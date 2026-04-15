@@ -1,12 +1,13 @@
 # Local Node tooling (ingest script) — reinstall with: cd scripts && npm install
 scripts/node_modules/
 
-# OS / editor
+# OS / editor / local AI tooling
 .DS_Store
 Thumbs.db
 *.swp
 .idea/
 .vscode/
+.claude/
 
 # Logs
 *.log
