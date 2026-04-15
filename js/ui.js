@@ -82,7 +82,7 @@ const UI = (() => {
 
     const typeLabels = {
       mcq: 'Multiple Choice', true_false: 'True / False',
-      short_answer: 'Short Answer', fill_blank: 'Fill in the Blank'
+      short_answer: 'Short Answer', long_answer: 'Long Answer', fill_blank: 'Fill in the Blank'
     };
     const diffColors = { easy: 'green', medium: 'yellow', hard: 'red' };
 
@@ -102,7 +102,6 @@ const UI = (() => {
     if (question.type !== 'fill_blank') {
       renderAnswerInput(question, answerArea, onAnswer, showAnswer);
     }
-    // fill_blank renders directly into question-text already handled
     if (question.type === 'fill_blank') {
       renderFillBlank(question, el, onAnswer, showAnswer);
     }
@@ -165,6 +164,26 @@ const UI = (() => {
       ta.disabled = disabled;
       ta.addEventListener('input', () => onAnswer?.(question.id, ta.value));
       container.appendChild(ta);
+
+    } else if (question.type === 'long_answer') {
+      const wrap = document.createElement('div');
+      const ta = document.createElement('textarea');
+      ta.className = 'short-answer-area';
+      ta.style.minHeight = '180px';
+      ta.placeholder = 'Write your full answer here. Use multiple paragraphs as needed.';
+      ta.value = question.user_answer || '';
+      ta.disabled = disabled;
+      const counter = document.createElement('div');
+      counter.style.cssText = 'font-size:.72rem;color:var(--text-muted);text-align:right;margin-top:.25rem';
+      const updateCounter = () => {
+        const words = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
+        counter.textContent = `${words} word${words !== 1 ? 's' : ''}`;
+      };
+      updateCounter();
+      ta.addEventListener('input', () => { onAnswer?.(question.id, ta.value); updateCounter(); });
+      wrap.appendChild(ta);
+      wrap.appendChild(counter);
+      container.appendChild(wrap);
     }
   }
 
@@ -243,7 +262,7 @@ const UI = (() => {
   }
 
   const typeLabels = {
-    mcq: 'MCQ', true_false: 'T/F', short_answer: 'Short', fill_blank: 'Fill'
+    mcq: 'MCQ', true_false: 'T/F', short_answer: 'Short', long_answer: 'Long', fill_blank: 'Fill'
   };
 
   // ── File drop zone ─────────────────────────────────────────────────────────

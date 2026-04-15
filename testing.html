@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Testing Harness</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/theme.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.82);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    #lightbox.open { display: flex; }
+    #lightbox img {
+      max-width: 92vw;
+      max-height: 92vh;
+      border-radius: 8px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6);
+      cursor: default;
+    }
+    .slide-thumb { cursor: zoom-in; }
+    .signal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: .4rem;
+      margin-top: .6rem;
+    }
+    .signal-chip {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: .3rem .5rem;
+      font-size: .75rem;
+    }
+    .signal-chip .label { color: var(--text-muted); display: block; }
+    .signal-chip .value { font-weight: 600; }
+    .signal-chip.warn { border-color: var(--warning); }
+    .signal-chip.ok   { border-color: var(--success); }
+    .fp-badge {
+      display: inline-block;
+      background: var(--warning);
+      color: #000;
+      font-size: .7rem;
+      font-weight: 700;
+      padding: .15rem .4rem;
+      border-radius: 4px;
+      margin-left: .4rem;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+<nav class="nav">
+  <a href="index.html" class="nav-logo">Exam Prepper</a>
+  <a href="index.html">Take Quiz</a>
+  <a href="review.html">Review & Grade</a>
+  <a href="docs.html">Generate</a>
+  <button class="theme-toggle" title="Switch to dark mode">☾</button>
+</nav>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <img id="lightbox-img" src="" alt="Slide full size">
+</div>
+
+<div class="page-layout">
+  <div class="page-header">
+    <h1>PDF Trigger Testing</h1>
+    <p>Runs the full classifier signal suite in the browser — same logic as <code>extract_slides.mjs</code>, no Gemini calls made.</p>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <div class="section-title">Load PDF</div>
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
+      <input id="pdf-file" type="file" accept=".pdf">
+      <button class="btn btn-primary" id="btn-run-test">Run classifier</button>
+      <span id="run-status" class="text-sm text-muted"></span>
+    </div>
+    <p class="text-sm text-muted" style="margin-top:.65rem">
+      Trigger reasons: <code>sparse_text</code>, <code>image_content</code>, <code>vector_diagram</code>.
+      Likely false positives flagged with <span style="background:var(--warning);color:#000;font-size:.7rem;font-weight:700;padding:.1rem .35rem;border-radius:4px">FP?</span>.
+      Click any slide image to zoom.
+    </p>
+  </div>
+
+  <!-- Gemini live analysis (test branch) -->
+  <div class="card" style="margin-bottom:1rem">
+    <div class="section-title">Gemini Live Analysis</div>
+    <p class="text-sm text-muted" style="margin-bottom:.75rem">
+      Run real Gemini analysis on triggered slides. Uses the same prompts as <code>extract_slides.mjs</code>.
+      Enter the dashboard password to unlock.
+    </p>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+      <input type="password" id="gemini-password" placeholder="Dashboard password" style="width:200px">
+      <button class="btn btn-secondary btn-sm" id="btn-analyze-all">Analyze all triggered slides</button>
+      <span id="gemini-status" class="text-sm text-muted"></span>
+    </div>
+  </div>
+
+  <!-- Trigger summary array -->
+  <div class="card" id="summary-card" style="margin-bottom:1rem;display:none">
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+      Trigger Summary
+      <button class="btn btn-sm" id="btn-copy-summary">Copy JSON</button>
+    </div>
+    <pre id="summary-output" style="white-space:pre-wrap;background:var(--bg);padding:.75rem;border:1px solid var(--border);border-radius:var(--radius);margin-top:.5rem;font-size:.82rem"></pre>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+    <div class="card">
+      <div class="section-title">Gemini Triggered</div>
+      <div id="triggered-count" class="text-sm text-muted" style="margin-bottom:.6rem">0 slides</div>
+      <div id="triggered-list"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">Not Triggered</div>
+      <div id="plain-count" class="text-sm text-muted" style="margin-bottom:.6rem">0 slides</div>
+      <div id="plain-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  // ─── THRESHOLDS (mirror extract_slides.mjs) ───────────────────────────────
+  const SPARSE_TEXT_THRESHOLD = 60;
+  const IMAGE_COVERAGE_MIN    = 0.05;
+  const VECTOR_COVERAGE_MIN   = 0.10;
+
+  // ─── TEXT BLOCKS ──────────────────────────────────────────────────────────
+  async function extractTextBlocks(page) {
+    const content = await page.getTextContent();
+    return content.items
+      .filter(item => item.str && item.str.trim().length > 0)
+      .map(item => ({
+        text: item.str,
+        x: item.transform[4],
+        y: item.transform[5],
+        fontSize: item.height
+      }));
+  }
+
+
+  // ─── IMAGE COUNT ──────────────────────────────────────────────────────────
+  async function countEmbeddedImages(page) {
+    const ops = await page.getOperatorList();
+    const { paintImageXObject, paintInlineImageXObject, paintImageMaskXObject } = pdfjsLib.OPS;
+    return ops.fnArray.filter(op =>
+      op === paintImageXObject ||
+      op === paintInlineImageXObject ||
+      op === paintImageMaskXObject
+    ).length;
+  }
+
+  // ─── COLORED TEXT ─────────────────────────────────────────────────────────
+  async function detectColoredText(page) {
+    const ops = await page.getOperatorList();
+    const { fnArray, argsArray } = ops;
+    const {
+      setFillRGBColor, setFillGray, setFillColorN, setFillColor, setFillCMYKColor,
+      showText, showSpacedText, nextLineShowText, nextLineSetSpacingShowText
+    } = pdfjsLib.OPS;
+    const textOps = new Set([showText, showSpacedText, nextLineShowText, nextLineSetSpacingShowText]);
+
+    let currentColor = { type: 'gray', value: 0 };
+    let coloredSegments = 0;
+    const colorsSeen = new Set();
+
+    function isBlack(c) {
+      if (c.type === 'gray') return c.value < 0.05;
+      if (c.type === 'rgb') return c.value[0] < 0.05 && c.value[1] < 0.05 && c.value[2] < 0.05;
+      if (c.type === 'cmyk') return c.value[3] > 0.9 && c.value[0] < 0.1 && c.value[1] < 0.1 && c.value[2] < 0.1;
+      return true;
+    }
+
+    for (let i = 0; i < fnArray.length; i++) {
+      const fn = fnArray[i], args = argsArray[i];
+      if      (fn === setFillGray)    currentColor = { type: 'gray', value: args[0] };
+      else if (fn === setFillRGBColor) currentColor = { type: 'rgb', value: args };
+      else if (fn === setFillCMYKColor) currentColor = { type: 'cmyk', value: args };
+      else if (fn === setFillColorN || fn === setFillColor) {
+        if (args.length === 3) currentColor = { type: 'rgb', value: args };
+        else if (args.length === 1) currentColor = { type: 'gray', value: args[0] };
+      } else if (textOps.has(fn) && !isBlack(currentColor)) {
+        coloredSegments++;
+        colorsSeen.add(JSON.stringify(currentColor));
+      }
+    }
+
+    return {
+      coloredTextSegments: coloredSegments,
+      distinctColors: colorsSeen.size,
+      colorSamples: [...colorsSeen].slice(0, 5).map(k => JSON.parse(k))
+    };
+  }
+
+  // ─── PIXEL COVERAGE ───────────────────────────────────────────────────────
+  async function estimateImageCoverage(page, textBlocks, renderCanvas) {
+    // Re-use the already-rendered canvas at a lower effective resolution
+    // by drawing it into a small offscreen canvas for sampling.
+    const SAMPLE_W = Math.round(renderCanvas.width * 0.33);
+    const SAMPLE_H = Math.round(renderCanvas.height * 0.33);
+    const offscreen = document.createElement('canvas');
+    offscreen.width  = SAMPLE_W;
+    offscreen.height = SAMPLE_H;
+    const ctx = offscreen.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, SAMPLE_W, SAMPLE_H);
+    ctx.drawImage(renderCanvas, 0, 0, SAMPLE_W, SAMPLE_H);
+
+    const { data, width, height } = ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H);
+    const totalPixels = width * height;
+    const scale = SAMPLE_W / renderCanvas.width;
+    const pageHeightPx = renderCanvas.height;
+
+    const textMask = new Uint8Array(totalPixels);
+    for (const b of textBlocks) {
+      const bx = Math.round(b.x * (renderCanvas.width / (renderCanvas.width / scale)) * scale / renderCanvas.width * SAMPLE_W);
+      // canvas y=0 is top; PDF y=0 is bottom — flip using rendered height
+      const pdfY = b.y;
+      const canvasY = pageHeightPx - pdfY * (pageHeightPx / (pageHeightPx / scale));
+      const by = Math.round(canvasY * scale);
+      const bw = Math.round(b.text.length * b.fontSize * 0.6 * scale);
+      const bh = Math.round(b.fontSize * scale * 1.5);
+      for (let row = Math.max(0, by - bh); row < Math.min(height, by + 4); row++)
+        for (let col = Math.max(0, bx); col < Math.min(width, bx + bw); col++)
+          textMask[row * width + col] = 1;
+    }
+
+    let nonWhiteNonText = 0;
+    for (let idx = 0; idx < totalPixels; idx++) {
+      if (textMask[idx]) continue;
+      if (data[idx*4] < 240 || data[idx*4+1] < 240 || data[idx*4+2] < 240) nonWhiteNonText++;
+    }
+    return parseFloat((nonWhiteNonText / totalPixels).toFixed(4));
+  }
+
+  // ─── FULL CLASSIFY ────────────────────────────────────────────────────────
+  async function classifySlide(page, blocks, rawText, canvas) {
+    const imageCount  = await countEmbeddedImages(page);
+    const coloredText = await detectColoredText(page);
+    const imgCoverage = await estimateImageCoverage(page, blocks, canvas);
+
+    const isSparse = rawText.length < SPARSE_TEXT_THRESHOLD;
+
+    let trigger = null;
+    let suppressedImage = false;
+
+    if (isSparse) {
+      trigger = 'sparse_text';
+    } else if (imageCount > 0) {
+      if (imgCoverage > IMAGE_COVERAGE_MIN) {
+        trigger = 'image_content';
+      } else {
+        suppressedImage = true; // imageCount > 0 but coverage too low — likely invisible object
+      }
+    } else if (imgCoverage > VECTOR_COVERAGE_MIN) {
+      trigger = 'vector_diagram';
+    }
+
+    // Likely FP: triggered but coverage is borderline
+    const likelyFP = trigger === 'vector_diagram' && imgCoverage < VECTOR_COVERAGE_MIN * 1.5;
+
+    return {
+      charCount: rawText.length,
+      imageCount,
+      imgCoverage,
+      ...coloredText,
+      trigger,
+      suppressedImage,
+      likelyFP
+    };
+  }
+
+  // ─── SLIDE STRUCTURE ──────────────────────────────────────────────────────
+  function buildSlideStructure(blocks) {
+    if (blocks.length === 0) return { title: '', bullets: [] };
+    const sorted = [...blocks].sort((a, b) => b.y - a.y);
+    const topY = sorted[0].y, bottomY = sorted[sorted.length - 1].y;
+    const pageHeight = topY - bottomY || 1;
+    const topZone = blocks.filter(b => b.y > topY - pageHeight * 0.3);
+    const titleBlock =
+      topZone.sort((a, b) => b.fontSize - a.fontSize)[0] ??
+      [...blocks].sort((a, b) => b.fontSize - a.fontSize)[0];
+    const bodyBlocks = blocks.filter(b => b !== titleBlock);
+    const lineMap = {};
+    for (const b of bodyBlocks) {
+      const key = Math.round(b.y / 4) * 4;
+      if (!lineMap[key]) lineMap[key] = [];
+      lineMap[key].push(b);
+    }
+    const bullets = Object.entries(lineMap)
+      .sort(([a], [b]) => Number(b) - Number(a))
+      .map(([, line]) => {
+        const lb = line.sort((a, b) => a.x - b.x);
+        return { text: lb.map(b => b.text).join(' ').trim(), level: Math.max(0, Math.round((lb[0].x - titleBlock.x) / 20)) };
+      })
+      .filter(b => b.text.length > 0);
+    return { title: titleBlock.text.trim(), bullets };
+  }
+
+  function formatSlide(slideNum, structure) {
+    const lines = [`## Slide ${slideNum}: ${structure.title || '(untitled)'}`];
+    for (const b of structure.bullets) lines.push(`${'  '.repeat(b.level)}- ${b.text}`);
+    return lines.join('\n');
+  }
+
+  // ─── GEMINI PROXY ─────────────────────────────────────────────────────────
+  async function analyzeWithGemini(canvas, triggerReason, borderline) {
+    const password = document.getElementById('gemini-password').value.trim();
+    if (!password) throw new Error('Enter the dashboard password first.');
+
+    // Downscale to ~1440px wide max before sending to keep payload reasonable
+    const MAX_W = 1440;
+    let src = canvas;
+    if (canvas.width > MAX_W) {
+      const scale = MAX_W / canvas.width;
+      const tmp = document.createElement('canvas');
+      tmp.width  = Math.round(canvas.width  * scale);
+      tmp.height = Math.round(canvas.height * scale);
+      tmp.getContext('2d').drawImage(canvas, 0, 0, tmp.width, tmp.height);
+      src = tmp;
+    }
+
+    // Strip data:image/png;base64, prefix
+    const dataUrl = src.toDataURL('image/jpeg', 0.85);
+    const imageBase64 = dataUrl.split(',')[1];
+
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+      body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg', triggerReason, borderline })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+    return data.text;
+  }
+
+  // ─── LIGHTBOX ─────────────────────────────────────────────────────────────
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+  lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
+  lightboxImg.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') lightbox.classList.remove('open'); });
+
+  // ─── RENDER CARD ──────────────────────────────────────────────────────────
+  function chip(label, value, cls = '') {
+    return `<div class="signal-chip ${cls}"><span class="label">${label}</span><span class="value">${value}</span></div>`;
+  }
+
+  function renderSlideCard(result) {
+    const card = document.createElement('details');
+    card.style.cssText = 'margin-bottom:.55rem;border:1px solid var(--border);border-radius:var(--radius);padding:.5rem .65rem;background:var(--surface)';
+
+    const fpBadge = result.signals.likelyFP ? '<span class="fp-badge">FP?</span>' : '';
+    const suppressed = result.signals.suppressedImage
+      ? ' <span class="text-sm text-muted">(image suppressed — low coverage)</span>' : '';
+
+    const summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;font-weight:600';
+    summary.innerHTML = `Slide ${result.slide}: ${result.title || '(untitled)'}${result.reason ? ` <span class="text-sm text-muted"> · ${result.reason}</span>` : ''}${fpBadge}${suppressed}`;
+
+    const body = document.createElement('div');
+    body.style.cssText = 'margin-top:.6rem';
+
+    // Signal chips
+    const s = result.signals;
+    const signals = document.createElement('div');
+    signals.className = 'signal-grid';
+    signals.innerHTML =
+      chip('chars', s.charCount, s.charCount < SPARSE_TEXT_THRESHOLD ? 'warn' : '') +
+      chip('images', s.imageCount, s.imageCount > 0 ? 'ok' : '') +
+      chip('imgPx%', (s.imgCoverage * 100).toFixed(1) + '%',
+        s.imgCoverage > IMAGE_COVERAGE_MIN ? 'ok' :
+        s.imgCoverage > VECTOR_COVERAGE_MIN * 0.7 ? 'warn' : '') +
+      chip('colTxtSegs', s.coloredTextSegments, s.coloredTextSegments > 0 ? 'ok' : '') +
+      chip('distinctClrs', s.distinctColors);
+
+    // Slide + text side by side
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.6rem;align-items:start';
+
+    const canvasWrap = document.createElement('div');
+    const canvas = result.canvas;
+    canvas.className = 'slide-thumb';
+    canvas.style.cssText = 'width:100%;height:auto;border:1px solid var(--border);border-radius:8px;display:block';
+    canvas.title = 'Click to zoom';
+    canvas.addEventListener('click', () => { lightboxImg.src = canvas.toDataURL(); lightbox.classList.add('open'); });
+    canvasWrap.appendChild(canvas);
+
+    const textWrap = document.createElement('div');
+    textWrap.innerHTML = `<pre style="white-space:pre-wrap;font-size:.8rem;background:var(--bg);padding:.55rem;border-radius:8px;border:1px solid var(--border);margin:0">${result.markdown.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`;
+
+    row.appendChild(canvasWrap);
+    row.appendChild(textWrap);
+
+    // Gemini analysis panel (only for triggered slides)
+    if (result.reason) {
+      const geminiPanel = document.createElement('div');
+      geminiPanel.style.cssText = 'margin-top:.75rem;border-top:1px solid var(--border);padding-top:.65rem';
+
+      const geminiHeader = document.createElement('div');
+      geminiHeader.style.cssText = 'display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem';
+      const analyzeBtn = document.createElement('button');
+      analyzeBtn.className = 'btn btn-sm btn-secondary';
+      analyzeBtn.textContent = 'Analyze with Gemini';
+      analyzeBtn.dataset.geminiBtn = '1';
+      const geminiStatus = document.createElement('span');
+      geminiStatus.className = 'text-sm text-muted';
+      geminiHeader.appendChild(analyzeBtn);
+      geminiHeader.appendChild(geminiStatus);
+
+      const geminiOutput = document.createElement('pre');
+      geminiOutput.style.cssText = 'white-space:pre-wrap;font-size:.8rem;background:var(--bg);padding:.55rem;border-radius:8px;border:1px solid var(--border);margin:0;display:none';
+
+      analyzeBtn.addEventListener('click', async () => {
+        analyzeBtn.disabled = true;
+        geminiStatus.textContent = 'Calling Gemini…';
+        geminiOutput.style.display = 'none';
+        try {
+          const text = await analyzeWithGemini(result.canvas, result.reason, result.signals.borderline ?? false);
+          geminiOutput.textContent = text;
+          geminiOutput.style.display = '';
+          geminiStatus.textContent = text.toLowerCase() === 'text only' ? '→ text only' : '✓ Done';
+          analyzeBtn.textContent = 'Re-analyze';
+        } catch (e) {
+          geminiStatus.textContent = `Error: ${e.message}`;
+          geminiStatus.style.color = 'var(--danger)';
+        }
+        analyzeBtn.disabled = false;
+      });
+
+      geminiPanel.appendChild(geminiHeader);
+      geminiPanel.appendChild(geminiOutput);
+      body.appendChild(geminiPanel);
+    }
+
+    body.appendChild(signals);
+    body.appendChild(row);
+    card.appendChild(summary);
+    card.appendChild(body);
+    return card;
+  }
+
+  // ─── MAIN ─────────────────────────────────────────────────────────────────
+  document.getElementById('btn-run-test').addEventListener('click', async () => {
+    const file = document.getElementById('pdf-file').files[0];
+    const status = document.getElementById('run-status');
+    const trigList = document.getElementById('triggered-list');
+    const plainList = document.getElementById('plain-list');
+    trigList.innerHTML = '';
+    plainList.innerHTML = '';
+    document.getElementById('triggered-count').textContent = '0 slides';
+    document.getElementById('plain-count').textContent = '0 slides';
+    document.getElementById('summary-card').style.display = 'none';
+
+    if (!file) { status.textContent = 'Choose a PDF first.'; status.style.color = 'var(--danger)'; return; }
+    if (typeof pdfjsLib === 'undefined') { status.textContent = 'PDF.js failed to load.'; status.style.color = 'var(--danger)'; return; }
+
+    status.textContent = 'Parsing...';
+    status.style.color = 'var(--text-muted)';
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const triggered = [], plain = [];
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        status.textContent = `Classifying slide ${i}/${pdf.numPages}…`;
+        const page = await pdf.getPage(i);
+        const blocks = await extractTextBlocks(page);
+        const rawText = blocks.map(b => b.text).join(' ');
+        const structure = buildSlideStructure(blocks);
+
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+        const signals = await classifySlide(page, blocks, rawText, canvas);
+
+        const result = {
+          slide: i,
+          title: structure.title,
+          reason: signals.trigger,
+          signals: { ...signals, borderline: signals.trigger === 'vector_diagram' && signals.imgCoverage < VECTOR_COVERAGE_MIN * 1.5 && signals.imgCoverage > VECTOR_COVERAGE_MIN },
+          rawTextLength: rawText.length,
+          blockCount: blocks.length,
+          markdown: formatSlide(i, structure),
+          canvas
+        };
+
+        if (signals.trigger) triggered.push(result);
+        else plain.push(result);
+      }
+
+      for (const r of triggered) trigList.appendChild(renderSlideCard(r));
+      for (const r of plain)     plainList.appendChild(renderSlideCard(r));
+
+      document.getElementById('triggered-count').textContent = `${triggered.length} slides`;
+      document.getElementById('plain-count').textContent = `${plain.length} slides`;
+      status.textContent = `Done. ${pdf.numPages} slides analyzed.`;
+      status.style.color = 'var(--success)';
+
+      const summary = [...triggered, ...plain]
+        .sort((a, b) => a.slide - b.slide)
+        .map(r => ({
+          slide: r.slide,
+          trigger: r.reason ?? null,
+          title: r.title || null,
+          imageCount: r.signals.imageCount,
+          imgCoverage: parseFloat((r.signals.imgCoverage * 100).toFixed(1)),
+          coloredTextSegments: r.signals.coloredTextSegments,
+          charCount: r.signals.charCount,
+          likelyFP: r.signals.likelyFP || undefined,
+          suppressedImage: r.signals.suppressedImage || undefined
+        }));
+
+      const summaryJson = JSON.stringify(summary, null, 2);
+      document.getElementById('summary-output').textContent = summaryJson;
+      document.getElementById('summary-card').style.display = '';
+
+      // Wire "Analyze all" after cards are rendered
+      document.getElementById('btn-analyze-all').onclick = async () => {
+        const btns = [...document.querySelectorAll('[data-gemini-btn]')];
+        if (!btns.length) { document.getElementById('gemini-status').textContent = 'Run the classifier first.'; return; }
+        const statusEl = document.getElementById('gemini-status');
+        statusEl.textContent = `Analyzing 0 / ${btns.length}…`;
+        statusEl.style.color = '';
+        for (let i = 0; i < btns.length; i++) {
+          statusEl.textContent = `Analyzing ${i + 1} / ${btns.length}…`;
+          btns[i].click();
+          // Wait for this card's analysis to finish before starting the next
+          await new Promise(resolve => {
+            const check = setInterval(() => {
+              if (!btns[i].disabled) { clearInterval(check); resolve(); }
+            }, 200);
+          });
+        }
+        statusEl.textContent = `Done — ${btns.length} slides analyzed.`;
+      };
+
+      document.getElementById('btn-copy-summary').onclick = () => {
+        navigator.clipboard.writeText(summaryJson).then(() => {
+          const btn = document.getElementById('btn-copy-summary');
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy JSON'; }, 1500);
+        });
+      };
+    } catch (err) {
+      status.textContent = `Failed: ${err.message}`;
+      status.style.color = 'var(--danger)';
+    }
+  });
+</script>
+</body>
+</html>

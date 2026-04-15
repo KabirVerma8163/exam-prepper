@@ -109,6 +109,10 @@
         <input type="number" id="gen-fb" value="2" min="0" max="99">
       </div>
       <div class="form-group" style="margin:0">
+        <label>Long Answer</label>
+        <input type="number" id="gen-la" value="0" min="0" max="99">
+      </div>
+      <div class="form-group" style="margin:0">
         <label>Difficulty</label>
         <select id="gen-difficulty">
           <option value="mixed">Mixed</option>
@@ -200,7 +204,7 @@
       <div class="section">
         <div class="section-title">Overview</div>
         <p class="text-sm" style="margin-bottom:1rem">A quiz file is a single JSON object. The LLM generates this file from your material. You import it into the Take Quiz page.</p>
-        <p class="text-sm text-muted">Supported question types: <code>mcq</code> · <code>true_false</code> · <code>short_answer</code> · <code>fill_blank</code></p>
+        <p class="text-sm text-muted">Supported question types: <code>mcq</code> · <code>true_false</code> · <code>short_answer</code> · <code>long_answer</code> · <code>fill_blank</code></p>
       </div>
       <div class="section">
         <div class="section-title">Full Schema</div>
@@ -335,7 +339,7 @@ quiz saved → Take Quiz → Finish & Export
     "questions": [
       {
         "id": "string — unique within this quiz, e.g. 'q_001'",
-        "type": "'mcq' | 'true_false' | 'short_answer' | 'fill_blank'",
+        "type": "'mcq' | 'true_false' | 'short_answer' | 'long_answer' | 'fill_blank'",
         "topic_id": "string | null — matches a topic ID from material.json",
         "topic_name": "string — human-readable topic/chapter name",
         "source_ref": "string | null — e.g. 'lecture1.md#section-3'",
@@ -409,6 +413,26 @@ quiz saved → Take Quiz → Finish & Export
         "blanks": ["nucleus", "nucleolus"],
         "difficulty": "easy", "marks": 2, "user_answer": null, "flagged": false, "visited": false,
         "grading": { "status": "ungraded", "score": null, "max_score": 2, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
+      },
+      {
+        "id": "q_005", "type": "long_answer", "topic_id": "topic_002", "topic_name": "Cell Membrane",
+        "source_ref": "lecture1.md#membrane",
+        "question": "Discuss the structure and function of the cell membrane, including the role of membrane proteins, selective permeability, and how membrane composition relates to its fluidity.",
+        "options": null, "correct_answer": null,
+        "rubric": "Full marks require a thorough multi-paragraph response covering: (1) fluid mosaic model with phospholipid bilayer structure, (2) types and roles of membrane proteins (integral, peripheral, channel, carrier, receptor), (3) selective permeability and the mechanisms of transport (passive, facilitated, active), (4) how cholesterol and fatty acid saturation affect membrane fluidity, (5) clinical or functional significance.",
+        "answer_pointers": [
+          "Phospholipid bilayer — hydrophilic heads outward, hydrophobic tails inward",
+          "Fluid mosaic model: proteins embedded in or attached to the bilayer",
+          "Integral proteins span the membrane; peripheral proteins are surface-associated",
+          "Channel and carrier proteins mediate selective transport",
+          "Receptor proteins transduce extracellular signals",
+          "Selective permeability: small non-polar molecules pass freely; ions/large molecules require assistance",
+          "Passive diffusion, facilitated diffusion, active transport — distinguish by energy requirement",
+          "Cholesterol buffers fluidity changes with temperature",
+          "Unsaturated fatty acids increase fluidity; saturated decrease it"
+        ],
+        "blanks": null, "difficulty": "hard", "marks": 10, "user_answer": null, "flagged": false, "visited": false,
+        "grading": { "status": "ungraded", "score": null, "max_score": 10, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
       }
     ]
   };
@@ -754,11 +778,11 @@ quiz saved → Take Quiz → Finish & Export
   });
 
   // ── Question count live total ──────────────────────────────────────────────
-  ['gen-mcq','gen-tf','gen-sa','gen-fb'].forEach(id => {
+  ['gen-mcq','gen-tf','gen-sa','gen-fb','gen-la'].forEach(id => {
     document.getElementById(id).addEventListener('input', updateTotal);
   });
   function updateTotal() {
-    const total = ['gen-mcq','gen-tf','gen-sa','gen-fb'].reduce((s, id) => s + (parseInt(document.getElementById(id).value) || 0), 0);
+    const total = ['gen-mcq','gen-tf','gen-sa','gen-fb','gen-la'].reduce((s, id) => s + (parseInt(document.getElementById(id).value) || 0), 0);
     document.getElementById('gen-total-display').textContent = total;
   }
 
@@ -775,7 +799,8 @@ quiz saved → Take Quiz → Finish & Export
     const tf   = parseInt(document.getElementById('gen-tf').value)   || 0;
     const sa   = parseInt(document.getElementById('gen-sa').value)   || 0;
     const fb   = parseInt(document.getElementById('gen-fb').value)   || 0;
-    const total = mcq + tf + sa + fb;
+    const la   = parseInt(document.getElementById('gen-la').value)   || 0;
+    const total = mcq + tf + sa + fb + la;
     const diff  = document.getElementById('gen-difficulty').value;
     const custom    = document.getElementById('gen-custom').value.trim();
     const reference = document.getElementById('gen-reference').value.trim();
@@ -784,8 +809,9 @@ quiz saved → Take Quiz → Finish & Export
     const typeLines = [];
     if (mcq > 0) typeLines.push(`- ${mcq} multiple choice questions (type: "mcq")`);
     if (tf  > 0) typeLines.push(`- ${tf} true/false questions (type: "true_false")`);
-    if (sa  > 0) typeLines.push(`- ${sa} short answer questions (type: "short_answer")`);
+    if (sa  > 0) typeLines.push(`- ${sa} short answer questions (type: "short_answer") — 2–5 sentences`);
     if (fb  > 0) typeLines.push(`- ${fb} fill-in-the-blank questions (type: "fill_blank")`);
+    if (la  > 0) typeLines.push(`- ${la} long answer questions (type: "long_answer") — multi-paragraph essay response`);
 
     const lines = [
       '# Task: Generate a Practice Quiz',
@@ -801,9 +827,10 @@ quiz saved → Take Quiz → Finish & Export
       '- Every question must have a non-null topic_name matching the content it draws from',
       '- MCQ: exactly 4 options (a, b, c, d) with plausible distractors',
       '- true_false: correct_answer must be the string "true" or "false"',
-      '- short_answer: provide a detailed rubric AND at least 3 answer_pointers',
+      '- short_answer: provide a detailed rubric AND at least 3 answer_pointers (2–5 sentence expected answer)',
+      '- long_answer: provide a detailed rubric AND at least 5 answer_pointers (multi-paragraph essay expected)',
       '- fill_blank: use ___ in the question text; blanks array must have one entry per ___',
-      '- marks: 1 for mcq/true_false, 2–5 for short_answer, number-of-blanks for fill_blank',
+      '- marks: 1 for mcq/true_false, 2–5 for short_answer, 5–15 for long_answer, number-of-blanks for fill_blank',
       '- All user_answer, flagged, visited fields and all grading sub-fields must be null/false/"ungraded"',
     ];
 
