@@ -1044,22 +1044,22 @@ quiz saved → Take Quiz → Finish & Export
 
   async function generateEnrichedSlidesMd(password, onProgress) {
     if (!loadedPDFBuffers.length) throw new Error('No PDFs loaded — upload PDFs in Step 1 first.');
-    const slides = [];
-    let slideNum = 0;
-    let totalPages = 0;
 
-    // Count total pages first for progress
+    // Phase 1: extract all pages, identify which need Gemini
     const pdfs = [];
     for (const { title, buffer } of loadedPDFBuffers) {
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
       pdfs.push({ title, pdf });
-      totalPages += pdf.numPages;
     }
+    const totalPages = pdfs.reduce((s, { pdf }) => s + pdf.numPages, 0);
+
+    const allSlides = []; // { slideNum, structure, trigger, borderline, canvas }
+    let slideNum = 0;
 
     for (const { title, pdf } of pdfs) {
       for (let i = 1; i <= pdf.numPages; i++) {
         slideNum++;
-        onProgress?.(`${title} — slide ${i}/${pdf.numPages} (${slideNum}/${totalPages} total)`);
+        onProgress?.(`Extracting ${title} — slide ${i}/${pdf.numPages} (${slideNum}/${totalPages})`);
 
         const page = await pdf.getPage(i);
         const blocks = await _extractBlocks(page);
@@ -1067,24 +1067,78 @@ quiz saved → Take Quiz → Finish & Export
         const structure = _buildSlideStructure(blocks);
         const { trigger, borderline } = await _triggerReason(rawText, blocks, page);
 
-        let visualDesc = null;
+        let canvas = null;
         if (trigger && password) {
           const vp = page.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
+          canvas = document.createElement('canvas');
           canvas.width = vp.width; canvas.height = vp.height;
           await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-          try {
-            visualDesc = await _callGeminiProxy(canvas, trigger, borderline, password);
-          } catch (e) {
-            visualDesc = `[Gemini error: ${e.message}]`;
-          }
         }
 
-        slides.push(_formatSlide(slideNum, structure, visualDesc, trigger));
+        allSlides.push({ slideNum, structure, trigger, borderline, canvas, visualDesc: null });
       }
     }
 
-    return slides.join('\n\n---\n\n');
+    // Phase 2: batch submit all triggered slides
+    const triggered = allSlides.filter(s => s.trigger && s.canvas);
+    if (triggered.length > 0 && password) {
+      onProgress?.(`Submitting ${triggered.length} slide(s) to Gemini batch…`);
+
+      const batchSlides = triggered.map(s => {
+        const MAX_W = 1440;
+        let src = s.canvas;
+        if (src.width > MAX_W) {
+          const scale = MAX_W / src.width;
+          const tmp = document.createElement('canvas');
+          tmp.width = MAX_W;
+          tmp.height = Math.round(src.height * scale);
+          tmp.getContext('2d').drawImage(src, 0, 0, tmp.width, tmp.height);
+          src = tmp;
+        }
+        return {
+          imageBase64: src.toDataURL('image/jpeg', 0.85).split(',')[1],
+          mimeType: 'image/jpeg',
+          triggerReason: s.trigger,
+          borderline: s.borderline
+        };
+      });
+
+      const submitRes = await fetch('/api/gemini-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+        body: JSON.stringify({ slides: batchSlides })
+      });
+      const submitData = await submitRes.json();
+      if (!submitData.ok) throw new Error(submitData.error || 'Batch submit failed');
+
+      const { batchName } = submitData;
+
+      // Phase 3: poll until done (max 10 min)
+      let results = null;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise(r => setTimeout(r, 5000));
+        onProgress?.(`Waiting for Gemini batch… (${(attempt + 1) * 5}s)`);
+
+        const pollRes = await fetch(
+          `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
+          { headers: { 'x-admin-password': password } }
+        );
+        const pollData = await pollRes.json();
+        if (!pollData.ok) throw new Error(pollData.error || 'Batch poll failed');
+
+        if (pollData.state === 'JOB_STATE_SUCCEEDED') { results = pollData.results; break; }
+        if (pollData.state === 'JOB_STATE_FAILED' || pollData.state === 'JOB_STATE_CANCELLED') {
+          throw new Error(`Batch job ${pollData.state}`);
+        }
+      }
+      if (!results) throw new Error('Batch job timed out after 10 minutes');
+
+      triggered.forEach((slide, i) => { slide.visualDesc = results[i]; });
+    }
+
+    // Phase 4: assemble output
+    onProgress?.('Assembling slides.md…');
+    return allSlides.map(s => _formatSlide(s.slideNum, s.structure, s.visualDesc, s.trigger)).join('\n\n---\n\n');
   }
 
   // ── slides.md loader ──────────────────────────────────────────────────────

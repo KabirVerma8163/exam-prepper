@@ -18,7 +18,7 @@ module.exports = async function handler(req, res) {
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
-  const model  = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const model  = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview';
   if (!apiKey) {
     return res.status(500).json({ error: 'GEMINI_API_KEY is not configured.' });
   }
