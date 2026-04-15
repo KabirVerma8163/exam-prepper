@@ -350,7 +350,7 @@ async function processSlides(pdfPath) {
     }
   }
 
-  return slides.join("\n\n---\n\n");
+  return slides.join("\n---\n");
 }
 
 // ─── RUN ──────────────────────────────────────────────────────────────────────

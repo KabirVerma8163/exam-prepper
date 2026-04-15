@@ -17,3 +17,8 @@ npm-debug.log*
 .env
 .env.local
 .env.*.local
+scripts/.env
+.vercel
+
+
+test*.*
