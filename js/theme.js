@@ -12,14 +12,14 @@
   }
 
   function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
     const next = current === 'dark' ? 'light' : 'dark';
     localStorage.setItem(STORAGE_KEY, next);
     applyTheme(next);
   }
 
   // Apply saved theme immediately (before paint) to avoid flash
-  const saved = localStorage.getItem(STORAGE_KEY) || 'light';
+  const saved = localStorage.getItem(STORAGE_KEY) || 'dark';
   applyTheme(saved);
 
   // Wire up buttons once DOM is ready
@@ -28,6 +28,6 @@
       btn.addEventListener('click', toggleTheme);
     });
     // Re-apply to set button labels correctly after DOM is ready
-    applyTheme(localStorage.getItem(STORAGE_KEY) || 'light');
+    applyTheme(localStorage.getItem(STORAGE_KEY) || 'dark');
   });
 })();
