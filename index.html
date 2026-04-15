@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Prepper — Take Quiz</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-logo">Exam Prepper</a>
+  <a href="index.html" class="active">Take Quiz</a>
+  <a href="review.html">Review & Grade</a>
+  <a href="setup.html">Setup</a>
+  <a href="docs.html">Generate</a>
+  <button class="theme-toggle" title="Switch to dark mode">☾</button>
+</nav>
+
+<!-- ── Load screen ─────────────────────────────────────────────────────────── -->
+<div id="load-screen" style="min-height:calc(100vh - 52px);padding:2rem 1.5rem;max-width:860px;margin:0 auto">
+
+  <!-- Library -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.5rem">
+    <h2 style="font-size:1.25rem">My Quizzes</h2>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <a href="docs.html" class="btn btn-secondary btn-sm">+ Generate Quiz</a>
+      <button class="btn btn-primary btn-sm" id="btn-show-import">+ Import Quiz</button>
+      <button class="btn btn-ghost btn-sm" id="btn-export-backup" title="Export all quizzes as backup">⬇ Backup</button>
+      <button class="btn btn-ghost btn-sm" id="btn-import-backup" title="Restore from backup">↑ Restore</button>
+      <input type="file" id="backup-input" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <div id="quiz-library">
+    <div class="text-muted text-sm" style="padding:2rem;text-align:center" id="library-empty">
+      No quizzes saved yet. Import one to get started.
+    </div>
+  </div>
+
+  <!-- Import panel (hidden by default) -->
+  <div id="import-panel" class="card hidden" style="margin-top:1.5rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <strong>Import a Quiz</strong>
+      <button class="btn btn-ghost btn-sm" id="btn-hide-import">✕</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+      <div class="form-group" style="margin:0">
+        <label>Subject / Course</label>
+        <input type="text" id="import-subject" placeholder="e.g. Biol 365">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Title override (optional)</label>
+        <input type="text" id="import-title" placeholder="Leave blank to use quiz title">
+      </div>
+    </div>
+
+    <div class="tabs" id="import-tabs" style="margin-bottom:1rem">
+      <div class="tab active" data-tab="drop-tab">Upload File</div>
+      <div class="tab" data-tab="paste-tab">Paste JSON</div>
+    </div>
+
+    <div class="tab-panel active" data-tab="drop-tab">
+      <div class="file-drop" id="quiz-drop">
+        <div class="drop-icon">📄</div>
+        <strong>Drop quiz JSON here</strong>
+        <p>or click to browse</p>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab="paste-tab">
+      <textarea id="paste-json" rows="10" placeholder='Paste quiz JSON here…&#10;&#10;{ "id": "...", "title": "...", "questions": [...] }'
+        style="font-family:monospace;font-size:0.78rem"></textarea>
+      <div style="margin-top:0.5rem;display:flex;justify-content:flex-end">
+        <button class="btn btn-primary" id="btn-import-paste">Import Pasted JSON</button>
+      </div>
+    </div>
+
+    <div style="margin-top:.75rem;text-align:center">
+      <a href="docs.html" class="text-sm text-muted">How to generate a quiz JSON →</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Quiz screen ─────────────────────────────────────────────────────────── -->
+<div id="quiz-screen" class="hidden">
+
+  <!-- Header -->
+  <div class="quiz-header">
+    <span class="quiz-title" id="quiz-title">Quiz</span>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <span class="progress-text" id="progress-text">0 / 0</span>
+    <span id="timer" class="text-sm text-muted"></span>
+    <button class="btn btn-sm btn-ghost" id="btn-mode-toggle" title="Switch to scroll mode">≡ Scroll</button>
+    <button class="btn btn-sm btn-secondary" id="btn-change-quiz">Change Quiz</button>
+    <button class="btn btn-sm btn-primary" id="btn-finish-header">Finish & Export</button>
+  </div>
+
+  <!-- Main grid -->
+  <div class="quiz-layout">
+
+    <!-- Sidebar -->
+    <aside class="quiz-sidebar">
+      <div>
+        <div class="topic-filter-title">Filter by Topic</div>
+        <div id="topic-chips">
+          <span class="topic-chip active" data-topic="">All</span>
+        </div>
+      </div>
+      <div>
+        <div class="topic-filter-title">Questions</div>
+        <div id="q-grid"></div>
+      </div>
+      <div class="sidebar-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#dcfce7;border:1px solid #86efac"></div> Answered</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#fef3c7;border:1px solid #fcd34d"></div> Flagged</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f1f5f9;border:1px solid #e2e6ed"></div> Unanswered</div>
+      </div>
+    </aside>
+
+    <!-- Question area -->
+    <main class="quiz-main">
+      <div class="question-number" id="question-number">Question 1 of 1</div>
+      <div id="question-display"></div>
+    </main>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="quiz-footer">
+    <div class="flex gap-1">
+      <button class="btn btn-secondary btn-sm" id="btn-prev">← Previous</button>
+      <button class="btn btn-ghost btn-sm" id="btn-flag">🚩 Flag</button>
+      <button class="btn btn-secondary btn-sm" id="btn-next">Next →</button>
+    </div>
+    <div class="flex gap-1">
+      <button class="btn btn-ghost btn-sm" id="btn-save-progress">💾 Save Progress</button>
+      <button class="btn btn-primary btn-sm" id="btn-finish-footer">Finish & Export</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Finish modal ─────────────────────────────────────────────────────────── -->
+<div id="finish-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Finish Quiz</h2>
+    <p id="finish-summary" style="margin-bottom:1rem;color:var(--text-muted);font-size:0.9rem"></p>
+
+    <div class="section-title">Save quiz file (with your answers)</div>
+    <p class="text-sm text-muted mb-2">Download the quiz JSON with your answers saved — use this to continue later or to submit for grading.</p>
+    <button class="btn btn-secondary" id="btn-download-quiz">⬇ Download Quiz JSON</button>
+
+    <hr class="divider">
+
+    <div class="section-title">Export for grading</div>
+    <p class="text-sm text-muted mb-2">Choose which questions to send for grading. Paste the exported JSON into an LLM chat.</p>
+    <div class="export-options" id="export-options">
+      <label class="export-option selected">
+        <input type="radio" name="export-sel" value="all" checked> All answered questions
+      </label>
+      <label class="export-option">
+        <input type="radio" name="export-sel" value="flagged"> Flagged questions only
+      </label>
+      <label class="export-option" id="export-by-topic-wrapper">
+        <input type="radio" name="export-sel" value="by-topic"> By topic…
+      </label>
+    </div>
+    <div id="topic-select-area" class="hidden" style="margin-top:0.5rem">
+      <div id="topic-checkboxes"></div>
+    </div>
+    <div class="flex gap-1 mt-2">
+      <button class="btn btn-primary" id="btn-copy-grading">📋 Copy Grading JSON</button>
+      <button class="btn btn-secondary" id="btn-download-grading">⬇ Download Grading JSON</button>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>Close</button>
+      <a href="review.html" class="btn btn-primary">Go to Review →</a>
+    </div>
+  </div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/grading.js"></script>
+<script src="js/export.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(function () {
+  // ── State ─────────────────────────────────────────────────────────────────
+  let currentTopicFilter = null; // null = all
+  let scrollMode = false;
+  let scrollObserver = null;
+
+  // ── Elements ──────────────────────────────────────────────────────────────
+  const loadScreen      = document.getElementById('load-screen');
+  const quizScreen      = document.getElementById('quiz-screen');
+  const quizDrop        = document.getElementById('quiz-drop');
+  const quizTitle       = document.getElementById('quiz-title');
+  const progressFill    = document.getElementById('progress-fill');
+  const progressText    = document.getElementById('progress-text');
+  const questionNumber  = document.getElementById('question-number');
+  const questionDisplay = document.getElementById('question-display');
+  const qGrid           = document.getElementById('q-grid');
+  const topicChips      = document.getElementById('topic-chips');
+  const finishModal     = document.getElementById('finish-modal');
+  const finishSummary   = document.getElementById('finish-summary');
+  const btnPrev         = document.getElementById('btn-prev');
+  const btnNext         = document.getElementById('btn-next');
+  const btnFlag         = document.getElementById('btn-flag');
+
+  // ── Library ───────────────────────────────────────────────────────────────
+  async function renderLibrary() {
+    const list = document.getElementById('quiz-library');
+    const empty = document.getElementById('library-empty');
+    let records;
+    try { records = await Store.getAllMeta(); } catch { records = []; }
+
+    // Sort by last_accessed desc
+    records.sort((a, b) => (b.last_accessed || '').localeCompare(a.last_accessed || ''));
+
+    if (!records.length) { empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+
+    // Group by subject
+    const groups = {};
+    records.forEach(r => { (groups[r.subject] = groups[r.subject] || []).push(r); });
+
+    list.innerHTML = '';
+    Object.entries(groups).forEach(([subject, quizzes]) => {
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-bottom:1.5rem';
+      section.innerHTML = `<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:.6rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">${UI.escapeHtml(subject)}</div>`;
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6rem';
+      quizzes.forEach(r => grid.appendChild(buildQuizCard(r)));
+      section.appendChild(grid);
+      list.appendChild(section);
+    });
+  }
+
+  function buildQuizCard(r) {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.85rem;cursor:pointer;transition:border-color .13s,box-shadow .13s;position:relative';
+    const pct = r.question_count ? Math.round((r.answered_count / r.question_count) * 100) : 0;
+    const gradedPct = r.question_count ? Math.round((r.graded_count / r.question_count) * 100) : 0;
+    card.innerHTML = `
+      <div style="font-weight:600;font-size:.9rem;margin-bottom:.25rem;padding-right:1.5rem">${UI.escapeHtml(r.title)}</div>
+      <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.6rem">${r.question_count} questions · last opened ${fmtDate(r.last_accessed)}</div>
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:.3rem">
+        <div style="height:100%;width:${pct}%;background:var(--primary);border-radius:2px"></div>
+      </div>
+      <div style="font-size:.72rem;color:var(--text-muted)">${pct}% answered${r.graded_count ? ` · ${gradedPct}% graded` : ''}</div>
+      <button class="del-btn" title="Delete quiz" style="position:absolute;top:.6rem;right:.6rem;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.85rem;opacity:.5;padding:2px 4px">✕</button>
+    `;
+    card.addEventListener('mouseenter', () => { card.style.borderColor = 'var(--primary)'; card.style.boxShadow = 'var(--shadow-md)'; });
+    card.addEventListener('mouseleave', () => { card.style.borderColor = 'var(--border)'; card.style.boxShadow = ''; });
+    card.addEventListener('click', async e => {
+      if (e.target.classList.contains('del-btn')) return;
+      const record = await Store.getQuiz(r.id);
+      if (record?.data) loadQuiz(record.data);
+    });
+    card.querySelector('.del-btn').addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!await UI.confirm(`Delete "${r.title}"? This cannot be undone.`, 'Delete', 'Cancel')) return;
+      await Store.deleteQuiz(r.id);
+      renderLibrary();
+      UI.toast('Quiz deleted');
+    });
+    return card;
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return 'never';
+    const d = new Date(iso), now = new Date();
+    const diff = Math.floor((now - d) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  // ── Import panel toggle ────────────────────────────────────────────────────
+  document.getElementById('btn-show-import').addEventListener('click', () => {
+    document.getElementById('import-panel').classList.remove('hidden');
+    document.getElementById('btn-show-import').classList.add('hidden');
+  });
+  document.getElementById('btn-hide-import').addEventListener('click', () => {
+    document.getElementById('import-panel').classList.add('hidden');
+    document.getElementById('btn-show-import').classList.remove('hidden');
+  });
+  UI.setupTabs(document.getElementById('import-panel'));
+
+  // ── Import helpers ─────────────────────────────────────────────────────────
+  async function importAndLoad(json) {
+    if (!json?.questions) throw new Error('Not a valid quiz JSON — missing questions array');
+    const subject = document.getElementById('import-subject').value.trim() || undefined;
+    const titleOverride = document.getElementById('import-title').value.trim();
+    if (titleOverride) json.title = titleOverride;
+    await Store.saveQuiz(json, subject);
+    loadQuiz(json);
+    renderLibrary();
+  }
+
+  UI.setupFileDrop(document.getElementById('quiz-drop'), async file => {
+    try { await importAndLoad(await Export.readJSONFile(file)); }
+    catch (e) { UI.toast(e.message, 'error'); }
+  });
+
+  document.getElementById('btn-import-paste').addEventListener('click', async () => {
+    const raw = document.getElementById('paste-json').value.trim();
+    if (!raw) { UI.toast('Paste some JSON first', 'error'); return; }
+    try { await importAndLoad(JSON.parse(raw)); }
+    catch (e) { UI.toast('Invalid JSON: ' + e.message, 'error'); }
+  });
+
+  // ── Load quiz ─────────────────────────────────────────────────────────────
+  function loadQuiz(json) {
+    Quiz.load(json);
+    loadScreen.classList.add('hidden');
+    quizScreen.classList.remove('hidden');
+    quizTitle.textContent = Quiz.getData().title || 'Untitled Quiz';
+    renderTopicChips();
+    renderGrid();
+    renderCurrent();
+    // Update last_accessed in store
+    Store.updateProgress(json).catch(() => {});
+  }
+
+  document.getElementById('btn-change-quiz').addEventListener('click', async () => {
+    if (!await UI.confirm('Leave this quiz? Progress has been auto-saved.')) return;
+    // Reset scroll mode
+    if (scrollMode) {
+      scrollMode = false;
+      if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+      document.getElementById('btn-mode-toggle').textContent = '≡ Scroll';
+      document.querySelector('.quiz-footer').style.display = '';
+    }
+    loadScreen.classList.remove('hidden');
+    quizScreen.classList.add('hidden');
+    renderLibrary();
+  });
+
+  // ── Mode toggle ────────────────────────────────────────────────────────────
+  document.getElementById('btn-mode-toggle').addEventListener('click', () => {
+    scrollMode = !scrollMode;
+    const btn = document.getElementById('btn-mode-toggle');
+    const footer = document.querySelector('.quiz-footer');
+    if (scrollMode) {
+      btn.textContent = '❙❙ Page';
+      btn.title = 'Switch to page mode';
+      footer.style.display = 'none';
+      renderScrollMode();
+    } else {
+      btn.textContent = '≡ Scroll';
+      btn.title = 'Switch to scroll mode';
+      footer.style.display = '';
+      if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+      renderCurrent();
+    }
+  });
+
+  // ── Paged mode ─────────────────────────────────────────────────────────────
+  function renderCurrent() {
+    const q = Quiz.currentQuestion();
+    if (!q) return;
+
+    questionDisplay.innerHTML = '';
+    questionDisplay.className = '';
+    const el = UI.renderQuestion(q, { onAnswer: handleAnswer });
+    questionDisplay.appendChild(el);
+
+    const idx = Quiz.currentIndex;
+    const total = Quiz.totalActive;
+    questionNumber.textContent = `Question ${idx + 1} of ${total}`;
+
+    btnPrev.disabled = idx === 0;
+    btnNext.disabled = idx === total - 1;
+    btnFlag.textContent = q.flagged ? '🚩 Unflag' : '🚩 Flag';
+    updateProgressBar();
+    renderGrid();
+  }
+
+  btnPrev.addEventListener('click', () => { Quiz.prev(); renderCurrent(); });
+  btnNext.addEventListener('click', () => { Quiz.next(); renderCurrent(); });
+  btnFlag.addEventListener('click', () => {
+    const q = Quiz.currentQuestion();
+    if (!q) return;
+    Quiz.toggleFlag(q.id);
+    if (scrollMode) {
+      // Re-render just this question's flag button in scroll mode
+      const qEl = questionDisplay.querySelector(`[data-qid="${q.id}"]`);
+      if (qEl) qEl.dataset.flagged = q.flagged ? '1' : '';
+      const flagBtn = document.querySelector(`.scroll-flag-btn[data-qid="${q.id}"]`);
+      if (flagBtn) { flagBtn.textContent = q.flagged ? '🚩 Unflag' : '🚩 Flag'; flagBtn.classList.toggle('flagged', q.flagged); }
+      renderGrid();
+    } else {
+      renderCurrent();
+    }
+  });
+
+  // Keyboard navigation (paged mode only)
+  document.addEventListener('keydown', e => {
+    if (!Quiz.isLoaded() || scrollMode) return;
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { Quiz.next(); renderCurrent(); }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { Quiz.prev(); renderCurrent(); }
+    if (e.key === 'f' || e.key === 'F') {
+      const q = Quiz.currentQuestion();
+      if (q) { Quiz.toggleFlag(q.id); renderCurrent(); }
+    }
+  });
+
+  // ── Scroll mode ────────────────────────────────────────────────────────────
+  function renderScrollMode() {
+    if (scrollObserver) { scrollObserver.disconnect(); scrollObserver = null; }
+
+    questionDisplay.innerHTML = '';
+    questionDisplay.className = 'scroll-mode-list';
+    document.getElementById('question-number').textContent = '';
+
+    const questions = Quiz.getActiveQuestions();
+
+    questions.forEach((q, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'scroll-question-block';
+      wrapper.id = `sq-${i}`;
+      wrapper.dataset.index = i;
+
+      // Per-question header with number + flag button
+      const qHeader = document.createElement('div');
+      qHeader.className = 'scroll-q-header';
+      qHeader.innerHTML = `<span class="scroll-q-num">Question ${i + 1} of ${questions.length}</span>`;
+      const flagBtn = document.createElement('button');
+      flagBtn.className = 'btn btn-ghost btn-sm scroll-flag-btn' + (q.flagged ? ' flagged' : '');
+      flagBtn.dataset.qid = q.id;
+      flagBtn.textContent = q.flagged ? '🚩 Unflag' : '🚩 Flag';
+      flagBtn.addEventListener('click', () => {
+        Quiz.toggleFlag(q.id);
+        flagBtn.textContent = q.flagged ? '🚩 Unflag' : '🚩 Flag';
+        flagBtn.classList.toggle('flagged', q.flagged);
+        renderGrid();
+      });
+      qHeader.appendChild(flagBtn);
+      wrapper.appendChild(qHeader);
+
+      const qEl = UI.renderQuestion(q, { onAnswer: (id, ans) => handleAnswerScroll(id, ans) });
+      wrapper.appendChild(qEl);
+      questionDisplay.appendChild(wrapper);
+
+      // Divider between questions
+      if (i < questions.length - 1) {
+        const div = document.createElement('hr');
+        div.className = 'scroll-divider';
+        questionDisplay.appendChild(div);
+      }
+    });
+
+    // IntersectionObserver: highlight sidebar dot as questions scroll into view
+    const mainEl = document.querySelector('.quiz-main');
+    scrollObserver = new IntersectionObserver(entries => {
+      let topmost = null;
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          const idx = parseInt(e.target.dataset.index);
+          if (topmost === null || idx < topmost) topmost = idx;
+        }
+      });
+      if (topmost !== null) {
+        Quiz.goTo(topmost);
+        renderGrid();
+        updateProgressBar();
+      }
+    }, { root: mainEl, threshold: 0.3 });
+
+    questionDisplay.querySelectorAll('.scroll-question-block').forEach(el => scrollObserver.observe(el));
+
+    renderGrid();
+    updateProgressBar();
+  }
+
+  function handleAnswerScroll(questionId, answer) {
+    Quiz.setAnswer(questionId, answer);
+    updateProgressBar();
+    renderGrid();
+    // No auto-advance in scroll mode
+  }
+
+  // ── Answer handler (paged) ─────────────────────────────────────────────────
+  function handleAnswer(questionId, answer) {
+    Quiz.setAnswer(questionId, answer);
+    updateProgressBar();
+    renderGrid();
+    const q = Quiz.getData().questions.find(q => q.id === questionId);
+    if (q && (q.type === 'mcq' || q.type === 'true_false')) {
+      setTimeout(() => {
+        if (Quiz.currentIndex < Quiz.totalActive - 1) {
+          Quiz.next();
+          renderCurrent();
+        }
+      }, 400);
+    }
+  }
+
+  // ── Progress bar ───────────────────────────────────────────────────────────
+  function updateProgressBar() {
+    const p = Quiz.getProgress();
+    UI.updateProgress(progressText, progressFill, p.answered, p.total);
+  }
+
+  // ── Question grid (sidebar) ────────────────────────────────────────────────
+  function renderGrid() {
+    qGrid.innerHTML = '';
+    const questions = Quiz.getActiveQuestions();
+    const grid = UI.renderQuestionGrid(questions, Quiz.currentIndex, i => {
+      if (scrollMode) {
+        // Scroll to the question block
+        const block = document.getElementById(`sq-${i}`);
+        if (block) block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        Quiz.goTo(i);
+        renderGrid();
+      } else {
+        Quiz.goTo(i);
+        renderCurrent();
+      }
+    });
+    qGrid.appendChild(grid);
+  }
+
+  // ── Topic chips ────────────────────────────────────────────────────────────
+  function renderTopicChips() {
+    topicChips.innerHTML = '';
+    const topics = Quiz.getTopics();
+    const all = document.createElement('span');
+    all.className = 'topic-chip active';
+    all.textContent = 'All';
+    all.dataset.topic = '';
+    topicChips.appendChild(all);
+
+    topics.forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = 'topic-chip';
+      chip.textContent = t;
+      chip.dataset.topic = t;
+      topicChips.appendChild(chip);
+    });
+
+    topicChips.addEventListener('click', e => {
+      const chip = e.target.closest('.topic-chip');
+      if (!chip) return;
+      topicChips.querySelectorAll('.topic-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      const topic = chip.dataset.topic;
+      Quiz.filterByTopics(topic ? [topic] : []);
+      renderGrid();
+      renderCurrent();
+    });
+  }
+
+  // ── Save progress ──────────────────────────────────────────────────────────
+  document.getElementById('btn-save-progress').addEventListener('click', () => {
+    const quiz = Quiz.getData();
+    if (!quiz) return;
+    Export.downloadJSON(quiz, `${slugify(quiz.title)}_progress.json`);
+    UI.toast('Progress saved!', 'success');
+  });
+
+  // ── Finish & export ────────────────────────────────────────────────────────
+  function openFinishModal() {
+    const p = Quiz.getProgress();
+    finishSummary.textContent = `${p.answered} of ${p.total} questions answered. ${p.flagged} flagged.`;
+
+    // Populate topic checkboxes
+    const topicCheckboxes = document.getElementById('topic-checkboxes');
+    topicCheckboxes.innerHTML = '';
+    Quiz.getTopics().forEach(t => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.85rem';
+      label.innerHTML = `<input type="checkbox" value="${UI.escapeHtml(t)}" checked> ${UI.escapeHtml(t)}`;
+      topicCheckboxes.appendChild(label);
+    });
+
+    finishModal.classList.remove('hidden');
+  }
+
+  document.getElementById('btn-finish-header').addEventListener('click', openFinishModal);
+  document.getElementById('btn-finish-footer').addEventListener('click', openFinishModal);
+
+  // Topic select toggle
+  document.querySelectorAll('input[name="export-sel"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      document.getElementById('topic-select-area').classList.toggle('hidden', radio.value !== 'by-topic');
+    });
+  });
+
+  document.querySelectorAll('.export-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      document.querySelectorAll('.export-option').forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+    });
+  });
+
+  function buildGradingExport() {
+    const quiz = Quiz.getData();
+    const sel = document.querySelector('input[name="export-sel"]:checked')?.value || 'all';
+    let filter = sel;
+    if (sel === 'by-topic') {
+      const checked = [...document.querySelectorAll('#topic-checkboxes input:checked')].map(i => i.value);
+      const ids = [];
+      quiz.questions.forEach(q => { if (checked.includes(q.topic_name)) ids.push(q.id); });
+      filter = ids;
+    }
+    return Export.buildGradingPayload(quiz, filter);
+  }
+
+  document.getElementById('btn-download-quiz').addEventListener('click', () => {
+    const quiz = Quiz.getData();
+    Export.downloadJSON(quiz, `${slugify(quiz.title)}.json`);
+  });
+
+  document.getElementById('btn-copy-grading').addEventListener('click', async () => {
+    const payload = buildGradingExport();
+    await Export.copyToClipboard(JSON.stringify(payload, null, 2));
+    UI.toast('Grading JSON copied to clipboard!', 'success');
+  });
+
+  document.getElementById('btn-download-grading').addEventListener('click', () => {
+    const quiz = Quiz.getData();
+    const payload = buildGradingExport();
+    Export.downloadJSON(payload, `${slugify(quiz.title)}_grading_export.json`);
+  });
+
+  // Close modal
+  finishModal.addEventListener('click', e => { if (e.target === finishModal) finishModal.classList.add('hidden'); });
+  finishModal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => finishModal.classList.add('hidden')));
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function slugify(s) {
+    return (s || 'quiz').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  // Auto-save to IndexedDB every 15s while a quiz is active
+  setInterval(() => {
+    if (Quiz.isLoaded()) Store.updateProgress(Quiz.getData()).catch(() => {});
+  }, 15000);
+
+  // Load from sessionStorage (redirect from Setup page)
+  const fromSetup = sessionStorage.getItem('ep_load_quiz');
+  if (fromSetup) {
+    sessionStorage.removeItem('ep_load_quiz');
+    try { importAndLoad(JSON.parse(fromSetup)).catch(() => {}); } catch {}
+  }
+
+  // ── Backup buttons ─────────────────────────────────────────────────────────
+  document.getElementById('btn-export-backup').addEventListener('click', async () => {
+    try {
+      const backup = await Store.exportBackup();
+      const date   = new Date().toISOString().slice(0, 10);
+      Export.downloadJSON(backup, `exam_prepper_backup_${date}.json`);
+      UI.toast(`Exported ${backup.quizzes.length} quizzes`, 'success');
+    } catch (e) { UI.toast('Export failed: ' + e.message, 'error'); }
+  });
+
+  document.getElementById('btn-import-backup').addEventListener('click', () => {
+    document.getElementById('backup-input').click();
+  });
+  document.getElementById('backup-input').addEventListener('change', async function () {
+    if (!this.files.length) return;
+    try {
+      const backup = await Export.readJSONFile(this.files[0]);
+      if (!await UI.confirm(`Restore ${(backup.quizzes || []).length} quizzes? This will merge with your existing data.`, 'Restore', 'Cancel')) return;
+      const result = await Store.importBackup(backup);
+      UI.toast(`Restored ${result.quizzes} quizzes`, 'success');
+      renderLibrary();
+    } catch (e) { UI.toast('Import failed: ' + e.message, 'error'); }
+    this.value = '';
+  });
+
+  // Render library on page load
+  renderLibrary();
+
+})();
+</script>
+</body>
+</html>

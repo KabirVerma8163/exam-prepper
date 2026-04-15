@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Prepper — Setup</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-logo">Exam Prepper</a>
+  <a href="index.html">Take Quiz</a>
+  <a href="review.html">Review & Grade</a>
+  <a href="setup.html" class="active">Setup</a>
+  <a href="docs.html">Generate</a>
+  <button class="theme-toggle" title="Switch to dark mode">☾</button>
+</nav>
+
+<div class="page-layout">
+  <div class="page-header">
+    <h1>Setup</h1>
+    <p>Ingest source material and manage your notes database.</p>
+  </div>
+
+  <!-- ── Ingest instructions ─────────────────────────────────────────────────── -->
+  <div class="card section">
+    <div class="section-title">Step 1 — Ingest Source Files</div>
+    <p class="text-sm" style="margin-bottom:1rem">Run the ingest script to parse your notes into a SQLite database and export a <code>material.json</code> for LLM use.</p>
+
+    <div class="code-block">
+      <pre># Install dependencies (once)
+cd scripts
+npm install
+
+# Ingest a single file
+node ingest.js ../data/sources/lecture1.md
+
+# Ingest with an explicit config
+node ingest.js ../data/sources/lecture1.pdf --config ../data/sources/lecture1.config.json
+
+# Ingest all files in the sources directory
+node ingest.js --all
+
+# Export material.json from the current database
+node ingest.js --export-material</pre>
+    </div>
+    <p class="text-sm text-muted" style="margin-top:.5rem">Supported formats: <strong>.md</strong> (Markdown), <strong>.pdf</strong>, <strong>.txt</strong> (plain text)</p>
+  </div>
+
+  <!-- ── View notes.db ───────────────────────────────────────────────────────── -->
+  <div class="card section">
+    <div class="section-title">Step 2 — Browse Ingested Content</div>
+    <p class="text-sm" style="margin-bottom:1rem">Load your <code>data/notes.db</code> file to inspect what was ingested.</p>
+    <div class="flex gap-1" style="margin-bottom:1rem">
+      <div class="file-drop" id="db-drop" style="flex:1;padding:1rem">
+        <strong>Drop notes.db here</strong>
+        <p>or click to browse</p>
+      </div>
+    </div>
+    <div id="db-status" class="text-sm text-muted"></div>
+    <div id="db-content" class="hidden" style="margin-top:1rem">
+      <div class="flex gap-1" style="margin-bottom:.75rem;flex-wrap:wrap">
+        <button class="btn btn-sm btn-secondary" id="btn-export-material">⬇ Export material.json</button>
+        <button class="btn btn-sm btn-ghost" id="btn-copy-material">📋 Copy material.json</button>
+      </div>
+      <div id="sources-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Source config generator ────────────────────────────────────────────── -->
+  <div class="card section">
+    <div class="section-title">Generate Source Config</div>
+    <p class="text-sm" style="margin-bottom:1rem">Fill in the form below to generate a <code>.config.json</code> file for a source. Place it alongside your source file with the same base name.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="form-group">
+        <label>Source filename</label>
+        <input type="text" id="cfg-filename" placeholder="e.g. lecture1.md">
+      </div>
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" id="cfg-title" placeholder="e.g. Intro Biology — Lecture 1">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Focus areas (comma-separated)</label>
+      <input type="text" id="cfg-focus" placeholder="e.g. Cell structure, Organelles, Membranes">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="form-group">
+        <label>Allowed question types</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.3rem">
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:400;color:var(--text)"><input type="checkbox" class="qt-check" value="mcq" checked> MCQ</label>
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:400;color:var(--text)"><input type="checkbox" class="qt-check" value="true_false" checked> True/False</label>
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:400;color:var(--text)"><input type="checkbox" class="qt-check" value="short_answer" checked> Short Answer</label>
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;font-weight:400;color:var(--text)"><input type="checkbox" class="qt-check" value="fill_blank"> Fill in Blank</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Difficulty</label>
+        <select id="cfg-difficulty">
+          <option value="mixed">Mixed</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Notes for LLM generator (optional)</label>
+      <textarea id="cfg-notes" rows="2" placeholder="e.g. Focus heavily on the diagrams from pages 5-8. Avoid questions about historical context."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Chapters (optional, one per line: <code>Chapter Name | pages</code>)</label>
+      <textarea id="cfg-chapters" rows="3" placeholder="Cell Structure | 1-12&#10;Membranes | 13-24&#10;Transport | 25-36"></textarea>
+    </div>
+    <div class="flex gap-1">
+      <button class="btn btn-primary" id="btn-gen-config">Generate Config</button>
+    </div>
+    <div id="config-output" class="hidden" style="margin-top:1rem">
+      <div class="code-block"><pre id="config-output-pre"></pre></div>
+      <div class="flex gap-1">
+        <button class="btn btn-sm btn-primary" id="btn-download-config">⬇ Download Config JSON</button>
+        <button class="btn btn-sm btn-secondary" id="btn-copy-config">📋 Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manage quizzes ──────────────────────────────────────────────────────── -->
+  <div class="card section">
+    <div class="section-title">Import Quiz JSON</div>
+    <p class="text-sm text-muted mb-2">Import a quiz generated by the LLM. It will open on the Take Quiz page.</p>
+    <div class="file-drop" id="quiz-import-drop" style="padding:1rem">
+      <strong>Drop quiz JSON here</strong>
+      <p>or click to browse — opens on Take Quiz page</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- sql.js loaded from CDN for in-browser SQLite -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="js/export.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(function () {
+
+  let db = null;
+  let materialJson = null;
+
+  // ── DB loader ──────────────────────────────────────────────────────────────
+  UI.setupFileDrop(document.getElementById('db-drop'), async file => {
+    try {
+      const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}` });
+      const buf = await file.arrayBuffer();
+      db = new SQL.Database(new Uint8Array(buf));
+      document.getElementById('db-status').textContent = `✓ Loaded: ${file.name}`;
+      document.getElementById('db-content').classList.remove('hidden');
+      renderSourcesList();
+      buildMaterialJson();
+    } catch (e) {
+      UI.toast('Failed to open database: ' + e.message, 'error');
+    }
+  }, '.db');
+
+  function renderSourcesList() {
+    const list = document.getElementById('sources-list');
+    list.innerHTML = '';
+    try {
+      const sources = db.exec('SELECT id, title, filename, format, imported_at FROM sources ORDER BY imported_at DESC')[0];
+      if (!sources) { list.innerHTML = '<p class="text-sm text-muted">No sources found in database.</p>'; return; }
+
+      sources.values.forEach(row => {
+        const [id, title, filename, format, imported_at] = row;
+
+        // Count chunks
+        const chunkCount = db.exec(`SELECT COUNT(*) FROM chunks WHERE source_id = '${id}'`)[0]?.values[0][0] || 0;
+        const topicCount = db.exec(`SELECT COUNT(*) FROM topics WHERE source_id = '${id}'`)[0]?.values[0][0] || 0;
+
+        const el = document.createElement('div');
+        el.className = 'card';
+        el.style.marginBottom = '0.5rem';
+        el.innerHTML = `
+          <div class="flex items-center gap-1">
+            <span class="badge badge-${format === 'pdf' ? 'red' : format === 'markdown' ? 'blue' : 'gray'}">${format}</span>
+            <strong style="font-size:.9rem">${UI.escapeHtml(title || filename)}</strong>
+            <span class="text-sm text-muted ms-auto">${topicCount} topics · ${chunkCount} chunks</span>
+          </div>
+          <div class="text-sm text-muted" style="margin-top:.25rem">${UI.escapeHtml(filename)} · Ingested ${new Date(imported_at).toLocaleDateString()}</div>
+        `;
+        list.appendChild(el);
+      });
+    } catch (e) {
+      list.innerHTML = `<p class="text-sm text-muted">Could not read sources: ${e.message}</p>`;
+    }
+  }
+
+  function buildMaterialJson() {
+    if (!db) return;
+    try {
+      const sources = db.exec('SELECT id, title, filename, format, imported_at, config FROM sources ORDER BY imported_at DESC')[0];
+      if (!sources) { materialJson = { export_version: '1.0', exported_at: new Date().toISOString(), sources: [] }; return; }
+
+      const sourcesArr = sources.values.map(row => {
+        const [sid, title, filename, format, imported_at, configStr] = row;
+        const topics = db.exec(
+          `SELECT id, name, level, parent_id FROM topics WHERE source_id = '${sid}' ORDER BY id`
+        )[0];
+
+        const topicsArr = (topics?.values || []).map(trow => {
+          const [tid, name, level, parent_id] = trow;
+          const chunks = db.exec(
+            `SELECT id, type, content, alt_text, position FROM chunks WHERE topic_id = '${tid}' ORDER BY position`
+          )[0];
+          return {
+            id: tid, name, level, parent_id: parent_id || null,
+            chunks: (chunks?.values || []).map(crow => {
+              const [cid, type, content, alt_text, position] = crow;
+              return { id: cid, type, content, alt_text: alt_text || null, position };
+            })
+          };
+        });
+
+        return {
+          id: sid, title: title || filename, filename, format,
+          config: configStr ? JSON.parse(configStr) : null,
+          topics: topicsArr
+        };
+      });
+
+      materialJson = { export_version: '1.0', exported_at: new Date().toISOString(), sources: sourcesArr };
+    } catch (e) {
+      UI.toast('Error building material.json: ' + e.message, 'error');
+    }
+  }
+
+  document.getElementById('btn-export-material').addEventListener('click', () => {
+    if (!materialJson) { UI.toast('Load a database first', 'error'); return; }
+    Export.downloadJSON(materialJson, 'material.json');
+    UI.toast('material.json downloaded!', 'success');
+  });
+
+  document.getElementById('btn-copy-material').addEventListener('click', async () => {
+    if (!materialJson) { UI.toast('Load a database first', 'error'); return; }
+    await Export.copyToClipboard(JSON.stringify(materialJson, null, 2));
+    UI.toast('material.json copied to clipboard!', 'success');
+  });
+
+  // ── Config generator ───────────────────────────────────────────────────────
+  let generatedConfig = null;
+
+  document.getElementById('btn-gen-config').addEventListener('click', () => {
+    const filename = document.getElementById('cfg-filename').value.trim();
+    const title = document.getElementById('cfg-title').value.trim();
+    const focus = document.getElementById('cfg-focus').value.trim();
+    const difficulty = document.getElementById('cfg-difficulty').value;
+    const notes = document.getElementById('cfg-notes').value.trim();
+    const chaptersRaw = document.getElementById('cfg-chapters').value.trim();
+    const qTypes = [...document.querySelectorAll('.qt-check:checked')].map(c => c.value);
+
+    if (!filename) { UI.toast('Enter a source filename', 'error'); return; }
+
+    const chapters = chaptersRaw ? chaptersRaw.split('\n').filter(Boolean).map(line => {
+      const [name, pages] = line.split('|').map(s => s.trim());
+      return { name, pages: pages || null };
+    }) : [];
+
+    generatedConfig = {
+      source: filename,
+      title: title || filename,
+      chapters,
+      test_config: {
+        question_types_allowed: qTypes,
+        difficulty,
+        focus_areas: focus ? focus.split(',').map(s => s.trim()).filter(Boolean) : [],
+        notes_for_generator: notes || null
+      }
+    };
+
+    const pre = document.getElementById('config-output-pre');
+    pre.textContent = JSON.stringify(generatedConfig, null, 2);
+    document.getElementById('config-output').classList.remove('hidden');
+    UI.enhanceCodeBlocks();
+  });
+
+  document.getElementById('btn-download-config').addEventListener('click', () => {
+    if (!generatedConfig) return;
+    const base = generatedConfig.source.replace(/\.[^.]+$/, '');
+    Export.downloadJSON(generatedConfig, `${base}.config.json`);
+  });
+
+  document.getElementById('btn-copy-config').addEventListener('click', async () => {
+    if (!generatedConfig) return;
+    await Export.copyToClipboard(JSON.stringify(generatedConfig, null, 2));
+    UI.toast('Config copied!', 'success');
+  });
+
+  // ── Quiz import (redirects to Take Quiz page) ──────────────────────────────
+  UI.setupFileDrop(document.getElementById('quiz-import-drop'), async file => {
+    try {
+      const json = await Export.readJSONFile(file);
+      if (!json.questions) throw new Error('Not a valid quiz file');
+      // Store in sessionStorage and redirect
+      sessionStorage.setItem('ep_load_quiz', JSON.stringify(json));
+      window.location.href = 'index.html';
+    } catch (e) {
+      UI.toast(e.message, 'error');
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

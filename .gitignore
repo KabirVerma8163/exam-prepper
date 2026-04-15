@@ -1,0 +1,18 @@
+# Local Node tooling (ingest script) — reinstall with: cd scripts && npm install
+scripts/node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Secrets (if you add env later)
+.env
+.env.local
+.env.*.local

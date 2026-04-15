@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Prepper — Generate Quiz</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/theme.js"></script>
+  <!-- PDF.js for in-browser PDF parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-logo">Exam Prepper</a>
+  <a href="index.html">Take Quiz</a>
+  <a href="review.html">Review & Grade</a>
+  <a href="setup.html">Setup</a>
+  <a href="docs.html" class="active">Generate</a>
+  <button class="theme-toggle" title="Switch to dark mode">☾</button>
+</nav>
+
+<div class="page-layout">
+  <div class="page-header">
+    <h1>Generate a Quiz</h1>
+    <p>Upload your notes, configure the quiz, copy the prompt to ChatGPT or Claude, then paste the result back here.</p>
+  </div>
+
+  <!-- ── Step 1: Load Material ─────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="section-title">Step 1 — Load your study material</div>
+    <p class="text-sm text-muted" style="margin-bottom:1rem">Upload your lecture PDFs, or a previously exported material.json. Your material is saved locally and reusable.</p>
+
+    <!-- Source type tabs -->
+    <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.75rem;flex-wrap:wrap">
+      <button class="btn btn-sm mat-tab active" data-mattab="saved">📚 Saved material</button>
+      <button class="btn btn-sm mat-tab" data-mattab="upload-pdf">📄 Upload PDFs</button>
+      <button class="btn btn-sm mat-tab" data-mattab="upload-json">📋 material.json</button>
+    </div>
+
+    <!-- Saved materials panel -->
+    <div class="mat-panel" data-mattab="saved">
+      <div id="saved-materials-list">
+        <div class="text-sm text-muted" id="saved-materials-empty" style="padding:.75rem 0">No saved material yet. Upload your PDFs or a material.json file to get started.</div>
+      </div>
+    </div>
+
+    <!-- Upload PDFs panel -->
+    <div class="mat-panel hidden" data-mattab="upload-pdf">
+      <div class="file-drop" id="pdf-drop" style="border-style:dashed">
+        <div class="drop-icon">📄</div>
+        <strong>Drop PDF files here</strong>
+        <p style="font-size:.8rem;color:var(--text-muted)">Multiple files OK — each becomes a source in your material</p>
+        <input type="file" id="pdf-input" accept=".pdf" multiple style="display:none">
+      </div>
+      <div id="pdf-process-status" style="margin-top:.75rem;font-size:.85rem"></div>
+    </div>
+
+    <!-- Upload material.json panel -->
+    <div class="mat-panel hidden" data-mattab="upload-json">
+      <div class="flex gap-1 items-center flex-wrap">
+        <button class="btn btn-secondary btn-sm" id="btn-load-material">📂 Choose material.json</button>
+        <span id="material-file-status" class="text-sm text-muted"></span>
+      </div>
+    </div>
+
+    <!-- After loading: save + status -->
+    <div id="material-loaded-bar" class="hidden" style="margin-top:1rem;padding:.75rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+        <span id="material-loaded-status" class="text-sm" style="color:var(--success);font-weight:500"></span>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <input type="text" id="material-label-input" placeholder="Label (e.g. Biol 365)" style="width:180px;font-size:.82rem">
+          <button class="btn btn-secondary btn-sm" id="btn-save-material">💾 Save for later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Select sources ─────────────────────────────────────────────── -->
+  <div id="source-selector" class="card hidden" style="margin-bottom:1.5rem">
+    <div class="section-title">Step 2 — Select sources to draw from</div>
+    <p class="text-sm text-muted" style="margin-bottom:.75rem">Choose which lectures or units the quiz should cover.</p>
+    <div id="source-checkboxes" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.4rem">
+      <button class="btn btn-ghost btn-sm" id="btn-select-all-sources">Select all</button>
+      <button class="btn btn-ghost btn-sm" id="btn-deselect-all-sources">Deselect all</button>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Question config ────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="section-title">Step 3 — Question types &amp; count</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.75rem;margin-bottom:.75rem">
+      <div class="form-group" style="margin:0">
+        <label>MCQ</label>
+        <input type="number" id="gen-mcq" value="10" min="0" max="99">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>True / False</label>
+        <input type="number" id="gen-tf" value="4" min="0" max="99">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Short Answer</label>
+        <input type="number" id="gen-sa" value="4" min="0" max="99">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Fill in Blank</label>
+        <input type="number" id="gen-fb" value="2" min="0" max="99">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Difficulty</label>
+        <select id="gen-difficulty">
+          <option value="mixed">Mixed</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+    </div>
+    <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">
+      Total: <strong id="gen-total-display">20</strong> questions
+    </div>
+
+    <!-- Custom instructions -->
+    <div class="form-group" style="margin-bottom:1rem">
+      <label>Custom instructions <span class="text-muted">(optional)</span></label>
+      <textarea id="gen-custom" rows="3"
+        placeholder="e.g. Focus on mechanisms not definitions. Make MCQ distractors plausible. Avoid questions about historical context."></textarea>
+    </div>
+
+    <!-- Practice exam reference -->
+    <div class="form-group" style="margin-bottom:1.25rem">
+      <label>Practice exam reference <span class="text-muted">(optional)</span></label>
+      <p class="text-sm text-muted" style="margin-bottom:.4rem">Paste a past exam here — the LLM will match its style and difficulty without copying questions.</p>
+      <textarea id="gen-reference" rows="5"
+        placeholder="Paste past exam questions here…&#10;&#10;1. Which of the following…&#10;   A) …  B) …"></textarea>
+    </div>
+
+    <div class="flex gap-1 flex-wrap">
+      <button class="btn btn-primary" id="btn-gen-quiz-prompt">📋 Copy Quiz Generation Prompt</button>
+      <button class="btn btn-secondary" id="btn-gen-grading-prompt">📋 Copy Grading Prompt</button>
+    </div>
+  </div>
+
+  <!-- ── Step 4: Paste LLM result ───────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="section-title">Step 4 — Paste the quiz back</div>
+    <p class="text-sm text-muted" style="margin-bottom:1rem">Paste the JSON your LLM generated. Give it a name and save — it'll appear in your quiz library.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+      <div class="form-group" style="margin:0">
+        <label>Quiz name</label>
+        <input type="text" id="result-quiz-name" placeholder="e.g. Biol 365 — Midterm Practice">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Subject / Course</label>
+        <input type="text" id="result-subject" placeholder="e.g. Biol 365">
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:1rem">
+      <label>Quiz JSON from LLM</label>
+      <textarea id="result-json" rows="8"
+        placeholder='Paste the JSON here…&#10;&#10;{ "id": "...", "title": "...", "questions": [...] }'
+        style="font-family:monospace;font-size:.78rem"></textarea>
+    </div>
+
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btn-save-quiz-result">💾 Save to My Quizzes</button>
+      <a href="index.html" class="btn btn-secondary hidden" id="btn-go-take-quiz">Take Quiz →</a>
+      <span id="result-status" class="text-sm text-muted"></span>
+    </div>
+  </div>
+
+  <!-- ── Data backup ─────────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-bottom:1.5rem">
+    <div class="section-title">Your data</div>
+    <p class="text-sm text-muted" style="margin-bottom:1rem">All quizzes and materials are stored locally in your browser's IndexedDB. Export a backup to keep a copy or move to another device.</p>
+    <div class="flex gap-1 flex-wrap">
+      <button class="btn btn-secondary btn-sm" id="btn-export-backup">⬇ Export all data</button>
+      <button class="btn btn-ghost btn-sm" id="btn-import-backup">↑ Restore from backup</button>
+      <input type="file" id="backup-input" accept=".json" style="display:none">
+    </div>
+    <div id="backup-status" class="text-sm text-muted" style="margin-top:.5rem"></div>
+  </div>
+
+  <!-- ── Tabs: schemas & docs ───────────────────────────────────────────────── -->
+  <div id="tabs-container">
+    <div class="tabs">
+      <div class="tab active" data-tab="quiz-format">Quiz JSON Format</div>
+      <div class="tab" data-tab="grading-format">Grading Format</div>
+      <div class="tab" data-tab="material-format">Material JSON Format</div>
+      <div class="tab" data-tab="how-to-use">How to Use</div>
+    </div>
+
+    <!-- ── Quiz JSON Format ─────────────────────────────────────────────────── -->
+    <div class="tab-panel active" data-tab="quiz-format">
+      <div class="section">
+        <div class="section-title">Overview</div>
+        <p class="text-sm" style="margin-bottom:1rem">A quiz file is a single JSON object. The LLM generates this file from your material. You import it into the Take Quiz page.</p>
+        <p class="text-sm text-muted">Supported question types: <code>mcq</code> · <code>true_false</code> · <code>short_answer</code> · <code>fill_blank</code></p>
+      </div>
+      <div class="section">
+        <div class="section-title">Full Schema</div>
+        <div class="code-block"><pre id="quiz-schema-block"></pre></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Example Quiz (4 questions, one of each type)</div>
+        <div class="code-block"><pre id="quiz-example-block"></pre></div>
+      </div>
+    </div>
+
+    <!-- ── Grading Format ───────────────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="grading-format">
+      <div class="section">
+        <div class="section-title">Overview</div>
+        <p class="text-sm" style="margin-bottom:1rem">When you export for grading, the tool sends a <code>grading_request</code> JSON. The LLM should return a <code>grading_response</code> JSON. You then import the response on the Review page.</p>
+      </div>
+      <div class="section">
+        <div class="section-title">Grading Request (sent to LLM)</div>
+        <div class="code-block"><pre id="grading-request-block"></pre></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Grading Response (expected from LLM)</div>
+        <div class="code-block"><pre id="grading-response-block"></pre></div>
+      </div>
+    </div>
+
+    <!-- ── Material Format ─────────────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="material-format">
+      <div class="section">
+        <div class="section-title">Overview</div>
+        <p class="text-sm" style="margin-bottom:1rem">The ingest script (<code>scripts/ingest.js</code>) parses your source files and produces two things:</p>
+        <ul class="text-sm" style="margin-bottom:1rem">
+          <li><code>data/notes.db</code> — SQLite database for internal indexing</li>
+          <li><code>data/material.json</code> — LLM-readable export of all content, organized by topic</li>
+        </ul>
+        <p class="text-sm text-muted">You can also upload PDFs directly on this page — they're processed in your browser and saved locally.</p>
+      </div>
+      <div class="section">
+        <div class="section-title">material.json Schema</div>
+        <div class="code-block"><pre id="material-schema-block"></pre></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Source Config Schema (per source file)</div>
+        <div class="code-block"><pre id="config-schema-block"></pre></div>
+      </div>
+    </div>
+
+    <!-- ── How to Use ───────────────────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="how-to-use">
+      <div class="section">
+        <div class="section-title">Quick start (no technical setup required)</div>
+        <ol style="font-size:.9rem;line-height:2.2;padding-left:1.5rem">
+          <li>On this page, click <strong>Upload PDFs</strong> and drop your lecture notes</li>
+          <li>Give the material a label (e.g. "Biol 365") and click <strong>Save for later</strong></li>
+          <li>Choose which lectures to draw from, set question counts, add any custom instructions</li>
+          <li>Click <strong>Copy Quiz Generation Prompt</strong></li>
+          <li>Open ChatGPT or Claude, paste the prompt, hit send</li>
+          <li>Copy the JSON the LLM returns, come back here, paste it in Step 4, name your quiz, click <strong>Save to My Quizzes</strong></li>
+          <li>Click <strong>Take Quiz →</strong> and start studying</li>
+        </ol>
+      </div>
+      <div class="section">
+        <div class="section-title">Grading workflow</div>
+        <ol style="font-size:.9rem;line-height:2.2;padding-left:1.5rem">
+          <li>After finishing a quiz, click <strong>Finish &amp; Export</strong></li>
+          <li>Copy the grading JSON and paste it into the LLM with the Grading Prompt</li>
+          <li>On the <strong>Review &amp; Grade</strong> page, click <strong>Import Grading Response</strong> and paste the result</li>
+        </ol>
+      </div>
+      <div class="section">
+        <div class="section-title">Pipeline overview (advanced)</div>
+        <div class="code-block" style="background:#1a2332">
+<pre style="color:#93c5fd">Option A — Browser-only (upload PDFs here)
+──────────────────────────────────────────
+Your PDFs → Upload on this page → material saved locally
+→ Configure → Copy prompt → LLM → Paste result back here
+
+Option B — Node.js ingest (for large/complex sources)
+──────────────────────────────────────────
+node scripts/ingest.js data/sources/lecture.pdf
+→ data/material.json generated
+→ Upload material.json here or load on Setup page
+
+Pipeline 2 — Take & Grade
+──────────────────────────────────────────
+quiz saved → Take Quiz → Finish & Export
+→ grading JSON → LLM → import response → Review page</pre>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Keyboard shortcuts (Take Quiz page)</div>
+        <table class="topic-table">
+          <tr><td><kbd>→</kbd> / <kbd>↓</kbd></td><td>Next question</td></tr>
+          <tr><td><kbd>←</kbd> / <kbd>↑</kbd></td><td>Previous question</td></tr>
+          <tr><td><kbd>F</kbd></td><td>Toggle flag on current question</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/export.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(function () {
+
+  // ── Set PDF.js worker ──────────────────────────────────────────────────────
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let loadedMaterial = null;
+
+  // ── Schema content ─────────────────────────────────────────────────────────
+
+  const QUIZ_SCHEMA = {
+    "$comment": "Exam Prepper — Quiz JSON v1.0. Generate this file from source material.",
+    "id": "string — unique identifier, e.g. 'quiz_001' or a UUID",
+    "title": "string — human-readable quiz title",
+    "description": "string | null — optional description",
+    "generated_at": "ISO 8601 timestamp string",
+    "source_ids": ["array of source identifiers this quiz is based on"],
+    "config": {
+      "time_limit_minutes": "number | null",
+      "randomize_questions": "boolean",
+      "randomize_options": "boolean"
+    },
+    "questions": [
+      {
+        "id": "string — unique within this quiz, e.g. 'q_001'",
+        "type": "'mcq' | 'true_false' | 'short_answer' | 'fill_blank'",
+        "topic_id": "string | null — matches a topic ID from material.json",
+        "topic_name": "string — human-readable topic/chapter name",
+        "source_ref": "string | null — e.g. 'lecture1.md#section-3'",
+        "question": "string — the question text. For fill_blank, use ___ for each blank.",
+        "options": [{ "id": "'a' | 'b' | 'c' | 'd' | ...", "text": "string — option text" }],
+        "$comment_options": "Include ONLY for type: 'mcq'. Minimum 2, typically 4 options.",
+        "correct_answer": "string | null — option id for MCQ, 'true'/'false' for true_false, null for short_answer/fill_blank",
+        "rubric": "string | null — for short_answer/fill_blank: describe what a full-mark answer must cover",
+        "answer_pointers": ["array of strings — key points the answer must touch on (for short_answer)"],
+        "blanks": ["array of correct answer strings for each ___ in fill_blank questions, in order"],
+        "$comment_blanks": "Include ONLY for type: 'fill_blank'. One entry per ___ in the question.",
+        "difficulty": "'easy' | 'medium' | 'hard' | null",
+        "marks": "number — marks awarded for a full correct answer (default: 1)",
+        "user_answer": "null — LLM must always set this to null",
+        "flagged": "false — LLM must always set this to false",
+        "visited": "false — LLM must always set this to false",
+        "grading": {
+          "status": "'ungraded' — LLM must always set this to 'ungraded'",
+          "score": "null", "max_score": "number — same as marks field",
+          "graded_by": "null", "feedback": "null", "criteria_used": "null", "graded_at": "null"
+        }
+      }
+    ]
+  };
+
+  const QUIZ_EXAMPLE = {
+    "id": "quiz_intro_bio_001",
+    "title": "Intro Biology — Chapter 1 Practice",
+    "description": "Cell structure and function",
+    "generated_at": "2025-01-01T12:00:00Z",
+    "source_ids": ["src_001"],
+    "config": { "time_limit_minutes": null, "randomize_questions": false, "randomize_options": false },
+    "questions": [
+      {
+        "id": "q_001", "type": "mcq", "topic_id": "topic_001", "topic_name": "Cell Structure",
+        "source_ref": "lecture1.md#organelles",
+        "question": "Which organelle is responsible for producing ATP via cellular respiration?",
+        "options": [
+          { "id": "a", "text": "Nucleus" }, { "id": "b", "text": "Mitochondria" },
+          { "id": "c", "text": "Ribosome" }, { "id": "d", "text": "Golgi apparatus" }
+        ],
+        "correct_answer": "b", "rubric": null, "answer_pointers": null, "blanks": null,
+        "difficulty": "easy", "marks": 1, "user_answer": null, "flagged": false, "visited": false,
+        "grading": { "status": "ungraded", "score": null, "max_score": 1, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
+      },
+      {
+        "id": "q_002", "type": "true_false", "topic_id": "topic_001", "topic_name": "Cell Structure",
+        "source_ref": null, "question": "Prokaryotic cells contain membrane-bound organelles.",
+        "options": null, "correct_answer": "false", "rubric": null, "answer_pointers": null, "blanks": null,
+        "difficulty": "easy", "marks": 1, "user_answer": null, "flagged": false, "visited": false,
+        "grading": { "status": "ungraded", "score": null, "max_score": 1, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
+      },
+      {
+        "id": "q_003", "type": "short_answer", "topic_id": "topic_002", "topic_name": "Cell Membrane",
+        "source_ref": "lecture1.md#membrane", "question": "Explain the fluid mosaic model of the cell membrane.",
+        "options": null, "correct_answer": null,
+        "rubric": "Must describe: (1) phospholipid bilayer, (2) embedded proteins, (3) fluid/dynamic nature, (4) mosaic variety.",
+        "answer_pointers": [
+          "Phospholipid bilayer with hydrophilic heads and hydrophobic tails",
+          "Proteins embedded in or attached to the bilayer",
+          "Membrane is fluid — components can move laterally",
+          "Mosaic refers to the variety of proteins and lipids"
+        ],
+        "blanks": null, "difficulty": "medium", "marks": 4, "user_answer": null, "flagged": false, "visited": false,
+        "grading": { "status": "ungraded", "score": null, "max_score": 4, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
+      },
+      {
+        "id": "q_004", "type": "fill_blank", "topic_id": "topic_001", "topic_name": "Cell Structure",
+        "source_ref": null, "question": "The ___ is the control centre of the cell, containing the ___, which houses the cell's DNA.",
+        "options": null, "correct_answer": null, "rubric": null, "answer_pointers": null,
+        "blanks": ["nucleus", "nucleolus"],
+        "difficulty": "easy", "marks": 2, "user_answer": null, "flagged": false, "visited": false,
+        "grading": { "status": "ungraded", "score": null, "max_score": 2, "graded_by": null, "feedback": null, "criteria_used": null, "graded_at": null }
+      }
+    ]
+  };
+
+  const GRADING_REQUEST_EXAMPLE = {
+    "grading_request": {
+      "quiz_id": "quiz_intro_bio_001", "quiz_title": "Intro Biology — Chapter 1 Practice",
+      "exported_at": "2025-01-01T14:00:00Z",
+      "instructions": "Grade each question. For each, fill in: score (0 to max_score), feedback (1-2 sentences), criteria_used ('rubric'|'correct_answer'|'answer_pointers'), graded_by set to 'llm'. Return ONLY valid JSON.",
+      "response_schema": { "grading_response": { "quiz_id": "<string>", "graded_at": "<ISO>", "grades": [{ "id": "<q id>", "score": "<number>", "max_score": "<number>", "feedback": "<string>", "criteria_used": "<string>", "graded_by": "llm" }] } },
+      "questions": [{ "id": "q_003", "type": "short_answer", "topic": "Cell Membrane", "question": "Explain the fluid mosaic model.", "rubric": "Must describe bilayer, proteins, fluidity, mosaic variety.", "answer_pointers": ["Phospholipid bilayer", "Embedded proteins"], "max_score": 4, "user_answer": "The cell membrane is made of a double layer of phospholipids. Proteins float in this layer." }]
+    }
+  };
+
+  const GRADING_RESPONSE_EXAMPLE = {
+    "grading_response": {
+      "quiz_id": "quiz_intro_bio_001", "graded_at": "2025-01-01T14:05:00Z",
+      "grades": [{ "id": "q_003", "score": 2, "max_score": 4, "feedback": "Good identification of the phospholipid bilayer and floating proteins. Missing hydrophilic/hydrophobic distinction, membrane fluidity concept, and mosaic variety.", "criteria_used": "rubric", "graded_by": "llm" }]
+    }
+  };
+
+  const MATERIAL_SCHEMA = {
+    "$comment": "Exam Prepper — material.json v1.0. Generated by scripts/ingest.js or browser PDF upload.",
+    "export_version": "1.0", "exported_at": "ISO 8601 timestamp",
+    "sources": [{ "id": "string", "title": "string", "filename": "string", "format": "'markdown' | 'pdf' | 'text'", "config": {}, "topics": [{ "id": "string", "name": "string", "level": "number", "parent_id": "string | null", "chunks": [{ "id": "string", "type": "'text'", "content": "string", "alt_text": "string | null", "position": "number" }] }] }]
+  };
+
+  const CONFIG_SCHEMA = {
+    "$comment": "Optional per-source config file. Name it <sourcename>.config.json alongside your source file.",
+    "source": "string", "title": "string",
+    "chapters": [{ "name": "string", "pages": "string | null", "notes": "string | null" }],
+    "test_config": { "question_types_allowed": ["mcq", "short_answer", "true_false", "fill_blank"], "difficulty": "'easy'|'medium'|'hard'|'mixed'", "focus_areas": [], "notes_for_generator": "string | null" }
+  };
+
+  // ── Render schemas ─────────────────────────────────────────────────────────
+  document.getElementById('quiz-schema-block').textContent      = JSON.stringify(QUIZ_SCHEMA, null, 2);
+  document.getElementById('quiz-example-block').textContent     = JSON.stringify(QUIZ_EXAMPLE, null, 2);
+  document.getElementById('grading-request-block').textContent  = JSON.stringify(GRADING_REQUEST_EXAMPLE, null, 2);
+  document.getElementById('grading-response-block').textContent = JSON.stringify(GRADING_RESPONSE_EXAMPLE, null, 2);
+  document.getElementById('material-schema-block').textContent  = JSON.stringify(MATERIAL_SCHEMA, null, 2);
+  document.getElementById('config-schema-block').textContent    = JSON.stringify(CONFIG_SCHEMA, null, 2);
+
+  // ── Tabs ───────────────────────────────────────────────────────────────────
+  UI.setupTabs(document.getElementById('tabs-container'));
+  UI.enhanceCodeBlocks();
+
+  // ── Material source tabs ───────────────────────────────────────────────────
+  document.querySelectorAll('.mat-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mat-tab').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.mat-panel').forEach(p => p.classList.add('hidden'));
+      btn.classList.add('active');
+      document.querySelector(`.mat-panel[data-mattab="${btn.dataset.mattab}"]`).classList.remove('hidden');
+    });
+  });
+
+  // ── Saved materials panel ──────────────────────────────────────────────────
+  async function renderSavedMaterials() {
+    const container = document.getElementById('saved-materials-list');
+    const empty     = document.getElementById('saved-materials-empty');
+    let mats;
+    try { mats = await Store.getAllMaterials(); } catch { mats = []; }
+
+    if (!mats.length) { if (empty) empty.classList.remove('hidden'); return; }
+    if (empty) empty.classList.add('hidden');
+
+    // Keep the empty msg in place; add cards after it
+    const existing = container.querySelectorAll('.saved-mat-card');
+    existing.forEach(el => el.remove());
+
+    mats.sort((a, b) => (b.last_updated || '').localeCompare(a.last_updated || ''));
+    mats.forEach(mat => {
+      const row = document.createElement('div');
+      row.className = 'saved-mat-card';
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:.4rem;gap:.75rem;flex-wrap:wrap';
+      row.innerHTML = `
+        <div>
+          <span style="font-weight:600;font-size:.88rem">${UI.escapeHtml(mat.label)}</span>
+          <span style="font-size:.75rem;color:var(--text-muted);margin-left:.6rem">${mat.source_count} source${mat.source_count !== 1 ? 's' : ''} · saved ${fmtDate(mat.last_updated)}</span>
+        </div>
+        <div style="display:flex;gap:.4rem">
+          <button class="btn btn-primary btn-sm" data-use="${UI.escapeHtml(mat.id)}">Use</button>
+          <button class="btn btn-ghost btn-sm" data-del="${UI.escapeHtml(mat.id)}">✕</button>
+        </div>`;
+      row.querySelector('[data-use]').addEventListener('click', async () => {
+        const full = await Store.getMaterial(mat.id);
+        if (full?.data) {
+          applyLoadedMaterial(full.data, mat.label);
+          UI.toast(`Loaded: ${mat.label}`, 'success');
+        }
+      });
+      row.querySelector('[data-del]').addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!await UI.confirm(`Delete "${mat.label}"? This cannot be undone.`, 'Delete', 'Cancel')) return;
+        await Store.deleteMaterial(mat.id);
+        row.remove();
+        UI.toast('Material deleted');
+      });
+      container.appendChild(row);
+    });
+  }
+
+  renderSavedMaterials();
+
+  // ── PDF upload & processing ────────────────────────────────────────────────
+  const pdfDrop  = document.getElementById('pdf-drop');
+  const pdfInput = document.getElementById('pdf-input');
+
+  pdfDrop.addEventListener('click', () => pdfInput.click());
+  pdfDrop.addEventListener('dragover', e => { e.preventDefault(); pdfDrop.classList.add('drag-over'); });
+  pdfDrop.addEventListener('dragleave', () => pdfDrop.classList.remove('drag-over'));
+  pdfDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    pdfDrop.classList.remove('drag-over');
+    const files = [...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (files.length) processPDFs(files);
+  });
+  pdfInput.addEventListener('change', () => {
+    if (pdfInput.files.length) processPDFs([...pdfInput.files]);
+  });
+
+  async function processPDFs(files) {
+    if (typeof pdfjsLib === 'undefined') {
+      UI.toast('PDF.js failed to load — check your internet connection', 'error'); return;
+    }
+    const status = document.getElementById('pdf-process-status');
+    status.innerHTML = `<span class="text-muted">Processing ${files.length} PDF${files.length > 1 ? 's' : ''}…</span>`;
+
+    const sources = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      status.innerHTML = `<span class="text-muted">Processing ${i + 1}/${files.length}: ${UI.escapeHtml(f.name)}…</span>`;
+      try {
+        const src = await processPDFFile(f);
+        sources.push(src);
+      } catch (err) {
+        status.innerHTML += `<br><span style="color:var(--danger)">✗ ${UI.escapeHtml(f.name)}: ${err.message}</span>`;
+      }
+    }
+
+    if (!sources.length) { status.innerHTML += '<br><span style="color:var(--danger)">No PDFs could be processed.</span>'; return; }
+
+    status.innerHTML = `<span style="color:var(--success)">✓ Processed ${sources.length} file${sources.length > 1 ? 's' : ''}</span>`;
+
+    const material = {
+      export_version: '1.0',
+      exported_at: new Date().toISOString(),
+      source: 'browser_upload',
+      sources
+    };
+
+    // Guess a label from filenames
+    const labelGuess = Store.guessSubject(sources[0]?.title) || sources[0]?.title?.split(/[\s-–—]/)[0] || 'My Material';
+    applyLoadedMaterial(material, labelGuess);
+  }
+
+  async function processPDFFile(file) {
+    const sourceId = `bsrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+
+    // First pass: collect font heights for threshold detection
+    const allHeights = [];
+    const pageContents = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page    = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      pageContents.push(content.items);
+      content.items.forEach(item => {
+        if (item.str?.trim()) {
+          const h = Math.abs(item.transform[3]);
+          if (h > 0) allHeights.push(h);
+        }
+      });
+    }
+
+    // Body text = 50th-percentile height; heading = anything ≥ 1.35× that
+    allHeights.sort((a, b) => a - b);
+    const bodyH    = allHeights[Math.floor(allHeights.length * 0.5)] || 12;
+    const headingThreshold = bodyH * 1.35;
+
+    const topics = [];
+    let currentTopic = null;
+    let topicIdx = 0;
+    let textBuf = '';
+
+    function flushBuf() {
+      const t = textBuf.trim();
+      if (!t || !currentTopic) { textBuf = ''; return; }
+      currentTopic.chunks.push({
+        id: `${currentTopic.id}_c${currentTopic.chunks.length}`,
+        type: 'text', content: t, alt_text: null,
+        position: currentTopic.chunks.length
+      });
+      textBuf = '';
+    }
+
+    function ensureTopicExists(name) {
+      if (!currentTopic) {
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40);
+        currentTopic = { id: `${sourceId}_t${topicIdx++}_${slug}`, name, level: 1, parent_id: null, chunks: [] };
+        topics.push(currentTopic);
+      }
+    }
+
+    for (const items of pageContents) {
+      // Group items into lines by Y-position
+      const lines = groupItemsIntoLines(items);
+
+      for (const line of lines) {
+        if (!line.text.trim()) continue;
+        if (line.maxHeight >= headingThreshold && line.text.trim().length >= 3 && line.text.trim().length <= 120) {
+          // Looks like a heading
+          flushBuf();
+          const name = line.text.trim();
+          const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40);
+          currentTopic = { id: `${sourceId}_t${topicIdx++}_${slug}`, name, level: 1, parent_id: null, chunks: [] };
+          topics.push(currentTopic);
+        } else {
+          ensureTopicExists(file.name.replace(/\.pdf$/i, ''));
+          textBuf += line.text + '\n';
+        }
+      }
+
+      // Flush at page boundary (helps with slide-style PDFs)
+      flushBuf();
+    }
+    flushBuf();
+
+    if (topics.length === 0) {
+      const allText = pageContents.flat().map(i => i.str || '').join(' ').trim();
+      topics.push({
+        id: `${sourceId}_t0_all`,
+        name: file.name.replace(/\.pdf$/i, ''),
+        level: 1, parent_id: null,
+        chunks: [{ id: `${sourceId}_t0_c0`, type: 'text', content: allText, alt_text: null, position: 0 }]
+      });
+    }
+
+    return {
+      id: sourceId,
+      title: file.name.replace(/\.pdf$/i, ''),
+      filename: file.name,
+      format: 'pdf',
+      config: null,
+      topics
+    };
+  }
+
+  function groupItemsIntoLines(items) {
+    const lines = [];
+    for (const item of items) {
+      if (!item.str) continue;
+      const y = item.transform[5];
+      let line = lines.find(l => Math.abs(l.y - y) < 3);
+      if (!line) {
+        line = { y, text: '', maxHeight: 0 };
+        lines.push(line);
+      }
+      line.text += item.str;
+      line.maxHeight = Math.max(line.maxHeight, Math.abs(item.transform[3]));
+    }
+    lines.sort((a, b) => b.y - a.y); // top-to-bottom reading order
+    return lines;
+  }
+
+  // ── material.json file picker ──────────────────────────────────────────────
+  document.getElementById('btn-load-material').addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', async () => {
+      try {
+        const json = await Export.readJSONFile(input.files[0]);
+        const label = Store.guessSubject(json.sources?.[0]?.title) || 'My Material';
+        document.getElementById('material-file-status').textContent = `✓ ${input.files[0].name} (${json.sources?.length || 0} sources)`;
+        applyLoadedMaterial(json, label);
+        UI.toast('material.json loaded', 'success');
+      } catch (e) { UI.toast(e.message, 'error'); }
+    });
+    input.click();
+  });
+
+  // ── Apply material (shared) ────────────────────────────────────────────────
+  function applyLoadedMaterial(material, labelSuggestion) {
+    loadedMaterial = material;
+    const count = material.sources?.length || 0;
+    document.getElementById('material-loaded-status').textContent = `✓ ${count} source${count !== 1 ? 's' : ''} loaded`;
+    document.getElementById('material-label-input').value = labelSuggestion || '';
+    document.getElementById('material-loaded-bar').classList.remove('hidden');
+    populateSourceSelector(material);
+    document.getElementById('source-selector').classList.remove('hidden');
+    // Auto-fill subject in result section
+    if (labelSuggestion && !document.getElementById('result-subject').value) {
+      document.getElementById('result-subject').value = labelSuggestion;
+    }
+  }
+
+  // ── Save material to IndexedDB ─────────────────────────────────────────────
+  document.getElementById('btn-save-material').addEventListener('click', async () => {
+    if (!loadedMaterial) { UI.toast('No material loaded', 'error'); return; }
+    const label = document.getElementById('material-label-input').value.trim() || 'My Material';
+    try {
+      await Store.saveMaterial(loadedMaterial, label);
+      UI.toast(`"${label}" saved!`, 'success');
+      renderSavedMaterials();
+    } catch (e) { UI.toast('Save failed: ' + e.message, 'error'); }
+  });
+
+  // ── Source selector ────────────────────────────────────────────────────────
+  function populateSourceSelector(material) {
+    const container = document.getElementById('source-checkboxes');
+    container.innerHTML = '';
+    (material.sources || []).forEach(src => {
+      const id    = `src-cb-${src.id}`;
+      const label = document.createElement('label');
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:.35rem;padding:.3rem .65rem;border:1px solid var(--primary);border-radius:var(--radius);cursor:pointer;font-size:.82rem;background:var(--primary-light);transition:all .1s';
+      label.innerHTML = `<input type="checkbox" id="${id}" value="${UI.escapeHtml(src.id)}" checked style="accent-color:var(--primary)"> ${UI.escapeHtml(src.title || src.filename)}`;
+      label.querySelector('input').addEventListener('change', e => {
+        label.style.background    = e.target.checked ? 'var(--primary-light)' : '';
+        label.style.borderColor   = e.target.checked ? 'var(--primary)' : 'var(--border)';
+      });
+      container.appendChild(label);
+    });
+  }
+
+  document.getElementById('btn-select-all-sources').addEventListener('click', () => {
+    document.querySelectorAll('#source-checkboxes input[type=checkbox]').forEach(cb => {
+      cb.checked = true;
+      const lbl = cb.closest('label');
+      lbl.style.background  = 'var(--primary-light)';
+      lbl.style.borderColor = 'var(--primary)';
+    });
+  });
+  document.getElementById('btn-deselect-all-sources').addEventListener('click', () => {
+    document.querySelectorAll('#source-checkboxes input[type=checkbox]').forEach(cb => {
+      cb.checked = false;
+      const lbl = cb.closest('label');
+      lbl.style.background  = '';
+      lbl.style.borderColor = 'var(--border)';
+    });
+  });
+
+  // ── Question count live total ──────────────────────────────────────────────
+  ['gen-mcq','gen-tf','gen-sa','gen-fb'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateTotal);
+  });
+  function updateTotal() {
+    const total = ['gen-mcq','gen-tf','gen-sa','gen-fb'].reduce((s, id) => s + (parseInt(document.getElementById(id).value) || 0), 0);
+    document.getElementById('gen-total-display').textContent = total;
+  }
+
+  // ── Build generation prompt ────────────────────────────────────────────────
+  function getSelectedSources() {
+    const checked = [...document.querySelectorAll('#source-checkboxes input[type=checkbox]:checked')];
+    if (!loadedMaterial || checked.length === 0) return loadedMaterial;
+    const ids = new Set(checked.map(cb => cb.value));
+    return { ...loadedMaterial, sources: loadedMaterial.sources.filter(s => ids.has(s.id)) };
+  }
+
+  function buildQuizGenerationPrompt() {
+    const mcq  = parseInt(document.getElementById('gen-mcq').value)  || 0;
+    const tf   = parseInt(document.getElementById('gen-tf').value)   || 0;
+    const sa   = parseInt(document.getElementById('gen-sa').value)   || 0;
+    const fb   = parseInt(document.getElementById('gen-fb').value)   || 0;
+    const total = mcq + tf + sa + fb;
+    const diff  = document.getElementById('gen-difficulty').value;
+    const custom    = document.getElementById('gen-custom').value.trim();
+    const reference = document.getElementById('gen-reference').value.trim();
+    const material  = getSelectedSources();
+
+    const typeLines = [];
+    if (mcq > 0) typeLines.push(`- ${mcq} multiple choice questions (type: "mcq")`);
+    if (tf  > 0) typeLines.push(`- ${tf} true/false questions (type: "true_false")`);
+    if (sa  > 0) typeLines.push(`- ${sa} short answer questions (type: "short_answer")`);
+    if (fb  > 0) typeLines.push(`- ${fb} fill-in-the-blank questions (type: "fill_blank")`);
+
+    const lines = [
+      '# Task: Generate a Practice Quiz',
+      '',
+      'You are generating a practice quiz for a student. You must return ONLY a valid JSON object matching the quiz schema below. No markdown, no explanation, no code fences — just raw JSON.',
+      '',
+      '## Required question breakdown',
+      `Generate exactly ${total} questions in total:`,
+      ...typeLines,
+      `Difficulty: ${diff}`,
+      '',
+      '## Hard rules',
+      '- Every question must have a non-null topic_name matching the content it draws from',
+      '- MCQ: exactly 4 options (a, b, c, d) with plausible distractors',
+      '- true_false: correct_answer must be the string "true" or "false"',
+      '- short_answer: provide a detailed rubric AND at least 3 answer_pointers',
+      '- fill_blank: use ___ in the question text; blanks array must have one entry per ___',
+      '- marks: 1 for mcq/true_false, 2–5 for short_answer, number-of-blanks for fill_blank',
+      '- All user_answer, flagged, visited fields and all grading sub-fields must be null/false/"ungraded"',
+    ];
+
+    if (custom) lines.push('', '## Additional instructions from the user', custom);
+    if (reference) {
+      lines.push('', '## Reference exam',
+        'The following is a past or practice exam for this course. Match its style, difficulty, question phrasing, and depth. Do not copy questions — use it as a style guide only.',
+        '', reference);
+    }
+
+    lines.push('', '## Quiz JSON Schema', JSON.stringify(QUIZ_SCHEMA, null, 2));
+    lines.push('', '## Full working example', JSON.stringify(QUIZ_EXAMPLE, null, 2));
+
+    if (material) {
+      const titles = material.sources?.map(s => s.title || s.filename).join(', ');
+      lines.push('', `## Source material (${material.sources?.length || 0} source(s): ${titles})`,
+        'Generate all questions from the content below:', '', JSON.stringify(material, null, 2));
+    } else {
+      lines.push('', '## Source material',
+        '[No material loaded — paste your notes here or attach your source files]');
+    }
+
+    return lines.join('\n');
+  }
+
+  document.getElementById('btn-gen-quiz-prompt').addEventListener('click', async () => {
+    const prompt = buildQuizGenerationPrompt();
+    await Export.copyToClipboard(prompt);
+    UI.toast('Quiz generation prompt copied!', 'success');
+  });
+
+  // ── Grading prompt ─────────────────────────────────────────────────────────
+  document.getElementById('btn-gen-grading-prompt').addEventListener('click', async () => {
+    const prompt = [
+      '# Task: Grade Student Answers',
+      '',
+      'You are grading a student\'s answers. You will receive a grading_request JSON. You must return ONLY a valid grading_response JSON. No markdown, no explanation, no code fences — just raw JSON.',
+      '',
+      '## Expected Response Schema',
+      JSON.stringify(GRADING_RESPONSE_EXAMPLE, null, 2),
+      '',
+      '## Rules',
+      '- Score each question from 0 to max_score',
+      '- Provide 1-2 sentences of feedback per question',
+      '- Set criteria_used to "rubric" if a rubric was provided, "correct_answer" for MCQ/TF, "answer_pointers" if pointers were used',
+      '- Set graded_by to "llm"',
+      '- Return a grade entry for EVERY question in the request',
+      '',
+      '## The Grading Request',
+      '[Paste your grading_request JSON here]'
+    ].join('\n');
+    await Export.copyToClipboard(prompt);
+    UI.toast('Grading prompt copied!', 'success');
+  });
+
+  // ── Paste quiz result (Step 4) ─────────────────────────────────────────────
+  // Auto-detect title from JSON as user types
+  document.getElementById('result-json').addEventListener('input', () => {
+    const raw = document.getElementById('result-json').value.trim();
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.title && !document.getElementById('result-quiz-name').value) {
+        document.getElementById('result-quiz-name').value = parsed.title;
+      }
+      if (!document.getElementById('result-subject').value) {
+        const guessed = Store.guessSubject(parsed.title);
+        if (guessed !== 'General') document.getElementById('result-subject').value = guessed;
+      }
+    } catch {}
+  });
+
+  document.getElementById('btn-save-quiz-result').addEventListener('click', async () => {
+    const raw     = document.getElementById('result-json').value.trim();
+    const name    = document.getElementById('result-quiz-name').value.trim();
+    const subject = document.getElementById('result-subject').value.trim();
+    const statusEl = document.getElementById('result-status');
+
+    if (!raw) { UI.toast('Paste your quiz JSON first', 'error'); return; }
+
+    let quiz;
+    try { quiz = JSON.parse(raw); } catch (e) { UI.toast('Invalid JSON: ' + e.message, 'error'); return; }
+    if (!quiz.questions) { UI.toast('Not a valid quiz — missing questions array', 'error'); return; }
+
+    if (!quiz.id) quiz.id = Store.generateId();
+    if (name)    quiz.title = name;
+
+    try {
+      await Store.saveQuiz(quiz, subject || undefined);
+      statusEl.textContent = `✓ Saved "${quiz.title}" (${quiz.questions.length} questions)`;
+      statusEl.style.color = 'var(--success)';
+      document.getElementById('btn-go-take-quiz').classList.remove('hidden');
+      UI.toast('Quiz saved!', 'success');
+      // Clear the textarea to prevent double-save
+      document.getElementById('result-json').value = '';
+    } catch (e) { UI.toast('Save failed: ' + e.message, 'error'); }
+  });
+
+  // ── Backup: export ─────────────────────────────────────────────────────────
+  document.getElementById('btn-export-backup').addEventListener('click', async () => {
+    try {
+      const backup = await Store.exportBackup();
+      const date   = new Date().toISOString().slice(0, 10);
+      Export.downloadJSON(backup, `exam_prepper_backup_${date}.json`);
+      document.getElementById('backup-status').textContent = `✓ Exported ${backup.quizzes.length} quizzes and ${backup.materials.length} materials.`;
+    } catch (e) { UI.toast('Export failed: ' + e.message, 'error'); }
+  });
+
+  // ── Backup: import ─────────────────────────────────────────────────────────
+  document.getElementById('btn-import-backup').addEventListener('click', () => {
+    document.getElementById('backup-input').click();
+  });
+  document.getElementById('backup-input').addEventListener('change', async function () {
+    if (!this.files.length) return;
+    try {
+      const backup = await Export.readJSONFile(this.files[0]);
+      if (!await UI.confirm(`Restore ${(backup.quizzes || []).length} quizzes and ${(backup.materials || []).length} materials? This will merge with your existing data.`, 'Restore', 'Cancel')) return;
+      const result = await Store.importBackup(backup);
+      document.getElementById('backup-status').textContent = `✓ Restored ${result.quizzes} quizzes and ${result.materials} materials.`;
+      renderSavedMaterials();
+      UI.toast('Backup restored!', 'success');
+    } catch (e) { UI.toast('Import failed: ' + e.message, 'error'); }
+    this.value = '';
+  });
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function fmtDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso), now = new Date();
+    const diff = Math.floor((now - d) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    if (diff < 7)  return `${diff}d ago`;
+    return d.toLocaleDateString();
+  }
+
+})();
+</script>
+</body>
+</html>

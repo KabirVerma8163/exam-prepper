@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Prepper — Review & Grade</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/theme.js"></script>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-logo">Exam Prepper</a>
+  <a href="index.html">Take Quiz</a>
+  <a href="review.html" class="active">Review & Grade</a>
+  <a href="setup.html">Setup</a>
+  <a href="docs.html">Generate</a>
+  <button class="theme-toggle" title="Switch to dark mode">☾</button>
+</nav>
+
+<!-- ── Load screen ─────────────────────────────────────────────────────────── -->
+<div id="load-screen" style="min-height:calc(100vh - 52px);padding:2rem 1.5rem;max-width:860px;margin:0 auto">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem">
+    <h2 style="font-size:1.25rem">Select a Quiz to Review</h2>
+    <button class="btn btn-secondary btn-sm" id="btn-show-import">+ Import Quiz</button>
+  </div>
+
+  <div id="quiz-library">
+    <div class="text-muted text-sm" style="padding:2rem;text-align:center" id="library-empty">
+      No quizzes saved yet. <a href="index.html">Take a quiz first</a> or import one below.
+    </div>
+  </div>
+
+  <!-- Import panel -->
+  <div id="import-panel" class="card hidden" style="margin-top:1.5rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <strong>Import a Quiz</strong>
+      <button class="btn btn-ghost btn-sm" id="btn-hide-import">✕</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+      <div class="form-group" style="margin:0">
+        <label>Subject / Course</label>
+        <input type="text" id="import-subject" placeholder="e.g. Biol 365">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Title override (optional)</label>
+        <input type="text" id="import-title" placeholder="Leave blank to use quiz title">
+      </div>
+    </div>
+
+    <div class="tabs" id="import-tabs" style="margin-bottom:1rem">
+      <div class="tab active" data-tab="drop-tab">Upload File</div>
+      <div class="tab" data-tab="paste-tab">Paste JSON</div>
+    </div>
+
+    <div class="tab-panel active" data-tab="drop-tab">
+      <div class="file-drop" id="quiz-drop">
+        <div class="drop-icon">📄</div>
+        <strong>Drop quiz JSON here</strong>
+        <p>or click to browse</p>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab="paste-tab">
+      <textarea id="paste-json" rows="10" placeholder='Paste quiz JSON here…'
+        style="font-family:monospace;font-size:0.78rem"></textarea>
+      <div style="margin-top:0.5rem;display:flex;justify-content:flex-end">
+        <button class="btn btn-primary" id="btn-import-paste">Import Pasted JSON</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Review screen ─────────────────────────────────────────────────────────── -->
+<div id="review-screen" class="hidden">
+  <div class="review-layout">
+
+    <!-- Score header -->
+    <div class="score-header card">
+      <div class="score-ring" id="score-display">—</div>
+      <div class="score-label" id="score-label">Load complete to see score</div>
+      <div class="stats-row" id="stats-row"></div>
+    </div>
+
+    <!-- Action bar -->
+    <div class="flex gap-1 flex-wrap mb-2" style="margin-bottom:1rem">
+      <button class="btn btn-secondary btn-sm" id="btn-change-quiz">← Load Different Quiz</button>
+      <button class="btn btn-secondary btn-sm" id="btn-import-grading">📥 Import Grading Response</button>
+      <button class="btn btn-primary btn-sm" id="btn-export-grading">📤 Export for Grading</button>
+      <button class="btn btn-ghost btn-sm" id="btn-save-quiz">💾 Save Quiz</button>
+    </div>
+
+    <!-- Filters -->
+    <div class="flex gap-1 flex-wrap mb-2" style="margin-bottom:0.75rem">
+      <span class="text-sm text-muted" style="align-self:center">Filter:</span>
+      <button class="btn btn-sm btn-secondary filter-btn active" data-filter="all">All</button>
+      <button class="btn btn-sm btn-secondary filter-btn" data-filter="ungraded">Ungraded</button>
+      <button class="btn btn-sm btn-secondary filter-btn" data-filter="needs_remark">Needs Remark</button>
+      <button class="btn btn-sm btn-secondary filter-btn" data-filter="graded">Graded</button>
+      <button class="btn btn-sm btn-secondary filter-btn" data-filter="flagged">Flagged</button>
+      <select id="topic-filter-select" class="btn btn-sm btn-secondary" style="width:auto;padding:.28rem .6rem">
+        <option value="">All topics</option>
+      </select>
+    </div>
+
+    <!-- Question list -->
+    <div id="question-list"></div>
+
+  </div>
+</div>
+
+<!-- ── Export modal ─────────────────────────────────────────────────────────── -->
+<div id="export-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Export for Grading</h2>
+    <p class="text-sm text-muted mb-2">Choose which questions to include in the grading payload. The JSON will include the question, rubric, and your answer — ready to paste into an LLM chat.</p>
+    <div class="export-options" id="export-options">
+      <label class="export-option selected">
+        <input type="radio" name="export-filter" value="all" checked> All questions with answers
+      </label>
+      <label class="export-option">
+        <input type="radio" name="export-filter" value="ungraded"> Ungraded only
+      </label>
+      <label class="export-option">
+        <input type="radio" name="export-filter" value="needs_remark"> Needs remark
+      </label>
+      <label class="export-option">
+        <input type="radio" name="export-filter" value="flagged"> Flagged only
+      </label>
+      <label class="export-option">
+        <input type="radio" name="export-filter" value="by-topic"> By topic…
+      </label>
+    </div>
+    <div id="export-topic-area" class="hidden" style="margin-top:.5rem">
+      <div id="export-topic-checkboxes"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-secondary" id="btn-do-download">⬇ Download JSON</button>
+      <button class="btn btn-primary" id="btn-do-copy">📋 Copy JSON</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Import modal ─────────────────────────────────────────────────────────── -->
+<div id="import-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Import Grading Response</h2>
+    <p class="text-sm text-muted mb-2">Paste the JSON returned by the LLM, or drop a file. It should match the <code>grading_response</code> schema.</p>
+    <div class="file-drop" id="grading-drop" style="margin-bottom:0.75rem">
+      <strong>Drop grading JSON here</strong>
+      <p>or click to browse</p>
+    </div>
+    <div class="form-group">
+      <label>Or paste JSON directly</label>
+      <textarea id="grading-paste" rows="8" placeholder='{ "grading_response": { ... } }'></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="btn-apply-grading">Apply Grades</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/grading.js"></script>
+<script src="js/export.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(function () {
+  let currentFilter = 'all';
+  let currentTopic = '';
+
+  const loadScreen   = document.getElementById('load-screen');
+  const reviewScreen = document.getElementById('review-screen');
+  const exportModal  = document.getElementById('export-modal');
+  const importModal  = document.getElementById('import-modal');
+
+  // ── Library ───────────────────────────────────────────────────────────────
+  async function renderLibrary() {
+    const list = document.getElementById('quiz-library');
+    const empty = document.getElementById('library-empty');
+    let records;
+    try { records = await Store.getAllMeta(); } catch { records = []; }
+    records.sort((a, b) => (b.last_accessed || '').localeCompare(a.last_accessed || ''));
+
+    if (!records.length) { empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+
+    const groups = {};
+    records.forEach(r => { (groups[r.subject] = groups[r.subject] || []).push(r); });
+
+    list.innerHTML = '';
+    Object.entries(groups).forEach(([subject, quizzes]) => {
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-bottom:1.5rem';
+      section.innerHTML = `<div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:.6rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">${UI.escapeHtml(subject)}</div>`;
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6rem';
+      quizzes.forEach(r => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.85rem;cursor:pointer;transition:border-color .13s,box-shadow .13s';
+        const gradedPct = r.question_count ? Math.round((r.graded_count / r.question_count) * 100) : 0;
+        const answeredPct = r.question_count ? Math.round((r.answered_count / r.question_count) * 100) : 0;
+        const statusColor = r.graded_count === r.question_count && r.question_count > 0 ? 'var(--success)' : 'var(--warning)';
+        card.innerHTML = `
+          <div style="font-weight:600;font-size:.9rem;margin-bottom:.25rem">${UI.escapeHtml(r.title)}</div>
+          <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.5rem">${r.question_count} questions · ${fmtDate(r.last_accessed)}</div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <span class="badge badge-blue">${answeredPct}% answered</span>
+            <span class="badge" style="background:${r.graded_count > 0 ? 'var(--success-light)' : 'var(--surface-2)'};color:${r.graded_count > 0 ? 'var(--success)' : 'var(--text-muted)'}">${gradedPct}% graded</span>
+          </div>`;
+        card.addEventListener('mouseenter', () => { card.style.borderColor = 'var(--primary)'; card.style.boxShadow = 'var(--shadow-md)'; });
+        card.addEventListener('mouseleave', () => { card.style.borderColor = 'var(--border)'; card.style.boxShadow = ''; });
+        card.addEventListener('click', async () => {
+          const record = await Store.getQuiz(r.id);
+          if (record?.data) initReview(record.data);
+        });
+        grid.appendChild(card);
+      });
+      section.appendChild(grid);
+      list.appendChild(section);
+    });
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return 'never';
+    const d = new Date(iso), now = new Date();
+    const diff = Math.floor((now - d) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  // ── Import panel ──────────────────────────────────────────────────────────
+  document.getElementById('btn-show-import').addEventListener('click', () => {
+    document.getElementById('import-panel').classList.remove('hidden');
+    document.getElementById('btn-show-import').classList.add('hidden');
+  });
+  document.getElementById('btn-hide-import').addEventListener('click', () => {
+    document.getElementById('import-panel').classList.add('hidden');
+    document.getElementById('btn-show-import').classList.remove('hidden');
+  });
+  UI.setupTabs(document.getElementById('import-panel'));
+
+  async function importAndReview(json) {
+    if (!json?.questions) throw new Error('Not a valid quiz JSON');
+    const subject = document.getElementById('import-subject').value.trim() || undefined;
+    const titleOverride = document.getElementById('import-title').value.trim();
+    if (titleOverride) json.title = titleOverride;
+    await Store.saveQuiz(json, subject);
+    initReview(json);
+    renderLibrary();
+  }
+
+  UI.setupFileDrop(document.getElementById('quiz-drop'), async file => {
+    try { await importAndReview(await Export.readJSONFile(file)); }
+    catch (e) { UI.toast(e.message, 'error'); }
+  });
+
+  document.getElementById('btn-import-paste').addEventListener('click', async () => {
+    const raw = document.getElementById('paste-json').value.trim();
+    if (!raw) { UI.toast('Paste some JSON first', 'error'); return; }
+    try { await importAndReview(JSON.parse(raw)); }
+    catch (e) { UI.toast('Invalid JSON: ' + e.message, 'error'); }
+  });
+
+  // ── Load quiz ─────────────────────────────────────────────────────────────
+  function initReview(json) {
+    Quiz.load(json);
+    loadScreen.classList.add('hidden');
+    reviewScreen.classList.remove('hidden');
+    populateTopicFilter();
+    renderScoreHeader();
+    renderQuestions();
+  }
+
+  document.getElementById('btn-change-quiz').addEventListener('click', async () => {
+    if (!await UI.confirm('Leave current review?')) return;
+    loadScreen.classList.remove('hidden');
+    reviewScreen.classList.add('hidden');
+    renderLibrary();
+  });
+
+  // ── Score header ───────────────────────────────────────────────────────────
+  function renderScoreHeader() {
+    const summary = Grading.getScoreSummary(Quiz.getData());
+    const scoreEl = document.getElementById('score-display');
+    const labelEl = document.getElementById('score-label');
+    const statsRow = document.getElementById('stats-row');
+
+    if (summary.gradedCount === 0) {
+      scoreEl.textContent = '—';
+      labelEl.textContent = 'No graded questions yet';
+    } else {
+      scoreEl.innerHTML = `${summary.totalScore}<span class="score-denom"> / ${summary.maxScore}</span>`;
+      labelEl.textContent = `${summary.percentage}% · ${summary.gradedCount} of ${summary.totalCount} graded`;
+    }
+
+    statsRow.innerHTML = `
+      <div class="stat-box"><div class="stat-n" style="color:var(--success)">${summary.gradedCount}</div><div class="stat-l">Graded</div></div>
+      <div class="stat-box"><div class="stat-n" style="color:var(--warning)">${summary.ungradedCount}</div><div class="stat-l">Ungraded</div></div>
+      <div class="stat-box"><div class="stat-n" style="color:var(--danger)">${summary.needsRemarkCount}</div><div class="stat-l">Needs Remark</div></div>
+      <div class="stat-box"><div class="stat-n">${summary.totalCount}</div><div class="stat-l">Total</div></div>
+    `;
+  }
+
+  // ── Topic filter ───────────────────────────────────────────────────────────
+  function populateTopicFilter() {
+    const sel = document.getElementById('topic-filter-select');
+    sel.innerHTML = '<option value="">All topics</option>';
+    Quiz.getTopics().forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => { currentTopic = sel.value; renderQuestions(); });
+  }
+
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentFilter = btn.dataset.filter;
+      renderQuestions();
+    });
+  });
+
+  // ── Question list ──────────────────────────────────────────────────────────
+  function renderQuestions() {
+    const list = document.getElementById('question-list');
+    list.innerHTML = '';
+    const all = Quiz.getData().questions;
+
+    const filtered = all.filter(q => {
+      if (currentTopic && q.topic_name !== currentTopic) return false;
+      if (currentFilter === 'ungraded') return q.grading.status === 'ungraded';
+      if (currentFilter === 'needs_remark') return q.grading.status === 'needs_remark';
+      if (currentFilter === 'graded') return q.grading.status === 'graded';
+      if (currentFilter === 'flagged') return q.flagged;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="card text-muted text-sm" style="text-align:center;padding:2rem">No questions match this filter.</div>';
+      return;
+    }
+
+    filtered.forEach((q, i) => {
+      list.appendChild(buildReviewItem(q, i));
+    });
+  }
+
+  function buildReviewItem(q, i) {
+    const item = document.createElement('div');
+    item.className = 'review-item';
+    item.dataset.qid = q.id;
+
+    const statusColor = {
+      graded: q.grading.score >= q.grading.max_score ? 'var(--success)' : 'var(--danger)',
+      ungraded: 'var(--warning)',
+      needs_remark: 'var(--danger)'
+    }[q.grading.status] || 'var(--text-muted)';
+
+    const statusBadge = {
+      graded: `<span class="badge badge-green">Graded</span>`,
+      ungraded: `<span class="badge badge-yellow">Ungraded</span>`,
+      needs_remark: `<span class="badge badge-red">Needs Remark</span>`
+    }[q.grading.status] || '';
+
+    const scoreDisplay = q.grading.status === 'graded'
+      ? `<span class="review-item-score" style="color:${statusColor}">${q.grading.score} / ${q.grading.max_score || q.marks || 1}</span>`
+      : '';
+
+    item.innerHTML = `
+      <div class="review-item-header">
+        <span class="text-sm text-muted" style="flex-shrink:0">Q${i + 1}</span>
+        <span class="review-item-title">${UI.escapeHtml(q.question.slice(0, 80))}${q.question.length > 80 ? '…' : ''}</span>
+        ${q.flagged ? '<span class="badge badge-orange">Flagged</span>' : ''}
+        ${statusBadge}
+        ${scoreDisplay}
+        <span class="text-muted text-sm" style="flex-shrink:0">▾</span>
+      </div>
+      <div class="review-item-body hidden"></div>
+    `;
+
+    const header = item.querySelector('.review-item-header');
+    const body = item.querySelector('.review-item-body');
+
+    header.addEventListener('click', () => {
+      const isOpen = !body.classList.contains('hidden');
+      if (isOpen) {
+        body.classList.add('hidden');
+      } else {
+        body.classList.remove('hidden');
+        if (!body.dataset.rendered) {
+          renderReviewBody(q, body);
+          body.dataset.rendered = '1';
+        }
+      }
+    });
+
+    return item;
+  }
+
+  function renderReviewBody(q, body) {
+    const typeLabel = { mcq: 'Multiple Choice', true_false: 'True / False', short_answer: 'Short Answer', fill_blank: 'Fill in the Blank' }[q.type] || q.type;
+
+    // Question text + answer input (disabled)
+    const qEl = UI.renderQuestion(q, { onAnswer: null, showAnswer: false });
+    // Disable all inputs in the rendered question
+    qEl.querySelectorAll('input, textarea, button').forEach(el => { el.disabled = true; });
+    body.appendChild(qEl);
+
+    // User answer block
+    const answerBlock = document.createElement('div');
+    if (q.user_answer !== null) {
+      let answerDisplay = '';
+      if (q.type === 'mcq' && q.options) {
+        const opt = q.options.find(o => o.id === q.user_answer);
+        answerDisplay = `${q.user_answer.toUpperCase()}: ${opt?.text || q.user_answer}`;
+      } else if (Array.isArray(q.user_answer)) {
+        answerDisplay = q.user_answer.join(', ');
+      } else {
+        answerDisplay = q.user_answer;
+      }
+
+      answerBlock.className = `answer-block ${q.grading.status === 'graded' && (q.grading.score || 0) >= (q.grading.max_score || 1) ? 'answer-correct' : q.grading.status === 'graded' ? 'answer-wrong' : 'answer-ungraded'}`;
+      answerBlock.innerHTML = `<strong>Your answer</strong> ${UI.escapeHtml(answerDisplay)}`;
+    } else {
+      answerBlock.className = 'answer-block answer-ungraded';
+      answerBlock.innerHTML = '<strong>Your answer</strong> <em>(not answered)</em>';
+    }
+    body.appendChild(answerBlock);
+
+    // Rubric / correct answer
+    if (q.rubric || q.answer_pointers?.length || (q.type !== 'short_answer' && q.correct_answer)) {
+      const rubricBlock = document.createElement('div');
+      rubricBlock.className = 'answer-block';
+      rubricBlock.style.background = 'var(--surface-2)';
+      let html = '';
+      if (q.type === 'mcq' && q.correct_answer && q.options) {
+        const opt = q.options.find(o => o.id === q.correct_answer);
+        html += `<strong>Correct answer</strong> ${q.correct_answer.toUpperCase()}: ${UI.escapeHtml(opt?.text || q.correct_answer)}<br>`;
+      } else if (q.type === 'true_false' && q.correct_answer) {
+        html += `<strong>Correct answer</strong> ${q.correct_answer}<br>`;
+      }
+      if (q.rubric) html += `<strong>Rubric</strong> ${UI.escapeHtml(q.rubric)}<br>`;
+      if (q.answer_pointers?.length) {
+        html += `<strong>Key points to cover:</strong><ul>${q.answer_pointers.map(p => `<li>${UI.escapeHtml(p)}</li>`).join('')}</ul>`;
+      }
+      rubricBlock.innerHTML = html;
+      body.appendChild(rubricBlock);
+    }
+
+    // Grading feedback
+    if (q.grading.feedback) {
+      const fb = document.createElement('div');
+      fb.className = 'answer-block';
+      fb.style.background = '#f8f9fc';
+      fb.innerHTML = `<strong>Feedback</strong> ${UI.escapeHtml(q.grading.feedback)}<br><small style="color:var(--text-muted)">Graded by: ${q.grading.graded_by || '—'}</small>`;
+      body.appendChild(fb);
+    }
+
+    // Manual grade form
+    body.appendChild(buildGradeForm(q, body));
+  }
+
+  function buildGradeForm(q, body) {
+    const form = document.createElement('div');
+    form.className = 'grade-form';
+    form.innerHTML = `
+      <div style="flex:0 0 auto">
+        <label>Score (max ${q.grading.max_score || q.marks || 1})</label>
+        <input type="number" class="grade-score" min="0" max="${q.grading.max_score || q.marks || 1}"
+          step="0.5" value="${q.grading.score ?? ''}" style="width:70px">
+      </div>
+      <div style="flex:1;min-width:180px">
+        <label>Feedback (optional)</label>
+        <textarea class="grade-feedback" rows="2" placeholder="e.g. Good answer, but missing X...">${q.grading.feedback || ''}</textarea>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.4rem;align-self:flex-end">
+        <button class="btn btn-sm btn-primary btn-save-grade">Save Grade</button>
+        <button class="btn btn-sm btn-ghost btn-needs-remark">Mark Needs Remark</button>
+        <button class="btn btn-sm btn-ghost btn-export-single" style="font-size:.72rem">Export this Q</button>
+      </div>
+    `;
+
+    form.querySelector('.btn-save-grade').addEventListener('click', () => {
+      const score = parseFloat(form.querySelector('.grade-score').value);
+      const feedback = form.querySelector('.grade-feedback').value.trim();
+      if (isNaN(score)) { UI.toast('Enter a valid score', 'error'); return; }
+      Grading.setManualGrade(Quiz.getData(), q.id, { score, feedback });
+      // Re-render the review item
+      const item = document.querySelector(`.review-item[data-qid="${q.id}"]`);
+      if (item) {
+        const newItem = buildReviewItem(Quiz.getData().questions.find(x => x.id === q.id), 0);
+        item.replaceWith(newItem);
+      }
+      renderScoreHeader();
+      UI.toast('Grade saved!', 'success');
+    });
+
+    form.querySelector('.btn-needs-remark').addEventListener('click', () => {
+      Grading.setManualGrade(Quiz.getData(), q.id, { markNeedsRemark: true });
+      UI.toast('Marked as needs remark', 'default');
+      renderQuestions();
+      renderScoreHeader();
+    });
+
+    form.querySelector('.btn-export-single').addEventListener('click', async () => {
+      const payload = Export.buildSingleGradingPayload(Quiz.getData(), q.id);
+      await Export.copyToClipboard(JSON.stringify(payload, null, 2));
+      UI.toast('Single question grading JSON copied!', 'success');
+    });
+
+    return form;
+  }
+
+  // ── Save quiz ──────────────────────────────────────────────────────────────
+  document.getElementById('btn-save-quiz').addEventListener('click', async () => {
+    const quiz = Quiz.getData();
+    if (!quiz) return;
+    await Store.updateProgress(quiz).catch(() => {});
+    Export.downloadJSON(quiz, `${slugify(quiz.title)}_reviewed.json`);
+    UI.toast('Quiz saved!', 'success');
+  });
+
+  // ── Export modal ───────────────────────────────────────────────────────────
+  document.getElementById('btn-export-grading').addEventListener('click', () => {
+    // Populate topic checkboxes
+    const tc = document.getElementById('export-topic-checkboxes');
+    tc.innerHTML = '';
+    Quiz.getTopics().forEach(t => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;font-size:.85rem';
+      label.innerHTML = `<input type="checkbox" value="${UI.escapeHtml(t)}" checked> ${UI.escapeHtml(t)}`;
+      tc.appendChild(label);
+    });
+    exportModal.classList.remove('hidden');
+  });
+
+  document.querySelectorAll('input[name="export-filter"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      document.getElementById('export-topic-area').classList.toggle('hidden', radio.value !== 'by-topic');
+    });
+  });
+
+  document.querySelectorAll('#export-modal .export-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      document.querySelectorAll('#export-modal .export-option').forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+    });
+  });
+
+  function getExportPayload() {
+    const quiz = Quiz.getData();
+    const sel = document.querySelector('input[name="export-filter"]:checked')?.value || 'all';
+    if (sel === 'by-topic') {
+      const checked = [...document.querySelectorAll('#export-topic-checkboxes input:checked')].map(i => i.value);
+      const ids = quiz.questions.filter(q => checked.includes(q.topic_name)).map(q => q.id);
+      return Export.buildGradingPayload(quiz, ids);
+    }
+    return Export.buildGradingPayload(quiz, sel);
+  }
+
+  document.getElementById('btn-do-copy').addEventListener('click', async () => {
+    const payload = getExportPayload();
+    await Export.copyToClipboard(JSON.stringify(payload, null, 2));
+    exportModal.classList.add('hidden');
+    UI.toast('Grading JSON copied!', 'success');
+  });
+
+  document.getElementById('btn-do-download').addEventListener('click', () => {
+    const quiz = Quiz.getData();
+    Export.downloadJSON(getExportPayload(), `${slugify(quiz.title)}_grading.json`);
+    exportModal.classList.add('hidden');
+  });
+
+  exportModal.addEventListener('click', e => { if (e.target === exportModal) exportModal.classList.add('hidden'); });
+  exportModal.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => exportModal.classList.add('hidden')));
+
+  // ── Import grading modal ───────────────────────────────────────────────────
+  document.getElementById('btn-import-grading').addEventListener('click', () => {
+    importModal.classList.remove('hidden');
+  });
+
+  UI.setupFileDrop(document.getElementById('grading-drop'), async file => {
+    try {
+      const json = await Export.readJSONFile(file);
+      applyGradingResponse(json);
+      importModal.classList.add('hidden');
+    } catch (e) {
+      UI.toast(e.message, 'error');
+    }
+  });
+
+  document.getElementById('btn-apply-grading').addEventListener('click', () => {
+    const pasted = document.getElementById('grading-paste').value.trim();
+    if (!pasted) { UI.toast('Paste a grading JSON first', 'error'); return; }
+    try {
+      const json = JSON.parse(pasted);
+      applyGradingResponse(json);
+      importModal.classList.add('hidden');
+    } catch (e) {
+      UI.toast('Invalid JSON: ' + e.message, 'error');
+    }
+  });
+
+  function applyGradingResponse(json) {
+    const result = Grading.applyGradingResponse(Quiz.getData(), json);
+    if (result.errors.length) {
+      UI.toast(`Applied ${result.applied} grades. ${result.errors.length} errors.`, 'default');
+    } else {
+      UI.toast(`Applied ${result.applied} grades successfully!`, 'success');
+    }
+    Store.updateProgress(Quiz.getData()).catch(() => {});
+    renderScoreHeader();
+    renderQuestions();
+  }
+
+  importModal.addEventListener('click', e => { if (e.target === importModal) importModal.classList.add('hidden'); });
+  importModal.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => importModal.classList.add('hidden')));
+
+  function slugify(s) {
+    return (s || 'quiz').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  renderLibrary();
+
+})();
+</script>
+</body>
+</html>
