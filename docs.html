@@ -51,7 +51,7 @@
         <div class="drop-icon">📄</div>
         <strong>Drop PDF files here</strong>
         <p style="font-size:.8rem;color:var(--text-muted)">Multiple files OK — each becomes a source in your material</p>
-        <p style="font-size:.75rem;color:var(--text-muted);margin-top:.35rem;max-width:42rem">Each page is also rasterized to a JPEG and embedded as base64 in the material (alongside extracted text), so diagrams and slides stay available — prompts can get very large.</p>
+        <p style="font-size:.75rem;color:var(--text-muted);margin-top:.35rem;max-width:42rem">Each page is rasterized (~1024px max edge, medium JPEG quality) and embedded as base64 alongside extracted text — smaller than full-res but prompts can still get huge on long PDFs.</p>
         <input type="file" id="pdf-input" accept=".pdf" multiple style="display:none">
       </div>
       <div id="pdf-process-status" style="margin-top:.75rem;font-size:.85rem"></div>
@@ -572,10 +572,10 @@ quiz saved → Take Quiz → Finish & Export
   }
 
   /** Rasterize one PDF page to a JPEG data URL (embedded in material JSON for prompts). */
-  async function rasterizePdfPageToDataURL(pdf, pageNum, maxDim = 1600, jpegQuality = 0.84) {
+  async function rasterizePdfPageToDataURL(pdf, pageNum, maxDim = 1024, jpegQuality = 0.72) {
     const page = await pdf.getPage(pageNum);
     const baseVP = page.getViewport({ scale: 1 });
-    const scale = Math.min(maxDim / Math.max(baseVP.width, baseVP.height), 2.25);
+    const scale = Math.min(maxDim / Math.max(baseVP.width, baseVP.height), 1.75);
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
