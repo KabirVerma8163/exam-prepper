@@ -154,6 +154,7 @@
         <button class="btn btn-ghost btn-sm" id="btn-clear-slides-md" style="display:none">✕ Clear</button>
         <input type="password" id="gemini-password" placeholder="Admin password" style="height:2rem;padding:0 .6rem;font-size:.8rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:140px">
         <button class="btn btn-ghost btn-sm" id="btn-generate-slides-md">⚡ Generate with Gemini</button>
+        <button class="btn btn-ghost btn-sm" id="btn-generate-slides-batch" style="color:#ef4444;border-color:#ef4444;opacity:.7" title="Not implemented — DO NOT USE">🚫 Batch (DO NOT USE)</button>
         <span id="slides-md-status" class="text-sm text-muted"></span>
       </div>
       <textarea id="gen-slides-md" rows="4"
@@ -929,6 +930,10 @@ quiz saved → Take Quiz → Finish & Export
       btn.disabled = false;
       btn.textContent = '⚡ Generate with Gemini';
     }
+  });
+
+  document.getElementById('btn-generate-slides-batch').addEventListener('click', () => {
+    alert('NOT IMPLEMENTED\n\nBatch uses the Gemini File API:\n1. Serialize requests as JSONL\n2. Upload via ai.files.upload()\n3. Create batch job with the file URI\n4. Poll until JOB_STATE_SUCCEEDED\n\nRequires @google/genai SDK — cannot run client-side.');
   });
 
   // ── Gemini enrichment pipeline ────────────────────────────────────────────
