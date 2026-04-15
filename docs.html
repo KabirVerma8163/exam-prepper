@@ -935,58 +935,71 @@ quiz saved → Take Quiz → Finish & Export
 
   const _SPARSE = 60, _IMG_MIN = 0.05, _VEC_MIN = 0.10, _VEC_BORDER = 0.15;
 
+  function _pipelineErr(fn, err) {
+    const msg = err?.message || String(err);
+    throw new Error(`${fn}(): ${msg}`);
+  }
+
   async function _extractBlocks(page) {
-    const content = await page.getTextContent();
-    return content.items.filter(i => i.str?.trim()).map(i => ({
-      text: i.str, x: i.transform[4], y: i.transform[5], fontSize: i.height
-    }));
+    try {
+      const content = await page.getTextContent();
+      return content.items.filter(i => i.str?.trim()).map(i => ({
+        text: i.str, x: i.transform[4], y: i.transform[5], fontSize: i.height
+      }));
+    } catch (e) { _pipelineErr('_extractBlocks', e); }
   }
 
   async function _countImages(page) {
-    const ops = await page.getOperatorList();
-    const { paintImageXObject, paintInlineImageXObject, paintImageMaskXObject } = pdfjsLib.OPS;
-    return ops.fnArray.filter(op => op === paintImageXObject || op === paintInlineImageXObject || op === paintImageMaskXObject).length;
+    try {
+      const ops = await page.getOperatorList();
+      const { paintImageXObject, paintInlineImageXObject, paintImageMaskXObject } = pdfjsLib.OPS;
+      return ops.fnArray.filter(op => op === paintImageXObject || op === paintInlineImageXObject || op === paintImageMaskXObject).length;
+    } catch (e) { _pipelineErr('_countImages', e); }
   }
 
   async function _imgCoverage(page, blocks) {
-    const scale = 0.4;
-    const vp = page.getViewport({ scale });
-    const c = document.createElement('canvas');
-    c.width = vp.width; c.height = vp.height;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
-    const total = width * height;
-    const mask = new Uint8Array(total);
-    for (const b of blocks) {
-      const bx = Math.round(b.x * scale);
-      const by = Math.round((vp.height / scale - b.y) * scale);
-      const bw = Math.round(b.text.length * b.fontSize * 0.6 * scale);
-      const bh = Math.round(b.fontSize * scale * 1.5);
-      for (let r = Math.max(0, by - bh); r < Math.min(height, by + 4); r++)
-        for (let col = Math.max(0, bx); col < Math.min(width, bx + bw); col++)
-          mask[r * width + col] = 1;
-    }
-    let nw = 0;
-    for (let idx = 0; idx < total; idx++) {
-      if (mask[idx]) continue;
-      if (data[idx*4] < 240 || data[idx*4+1] < 240 || data[idx*4+2] < 240) nw++;
-    }
-    return nw / total;
+    try {
+      const scale = 0.4;
+      const vp = page.getViewport({ scale });
+      const c = document.createElement('canvas');
+      c.width = vp.width; c.height = vp.height;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      const total = width * height;
+      const mask = new Uint8Array(total);
+      for (const b of blocks) {
+        const bx = Math.round(b.x * scale);
+        const by = Math.round((vp.height / scale - b.y) * scale);
+        const bw = Math.round(b.text.length * b.fontSize * 0.6 * scale);
+        const bh = Math.round(b.fontSize * scale * 1.5);
+        for (let r = Math.max(0, by - bh); r < Math.min(height, by + 4); r++)
+          for (let col = Math.max(0, bx); col < Math.min(width, bx + bw); col++)
+            mask[r * width + col] = 1;
+      }
+      let nw = 0;
+      for (let idx = 0; idx < total; idx++) {
+        if (mask[idx]) continue;
+        if (data[idx*4] < 240 || data[idx*4+1] < 240 || data[idx*4+2] < 240) nw++;
+      }
+      return nw / total;
+    } catch (e) { _pipelineErr('_imgCoverage', e); }
   }
 
   async function _triggerReason(rawText, blocks, page) {
-    if (rawText.length < _SPARSE) return { trigger: 'sparse_text', borderline: false };
-    const imgCount = await _countImages(page);
-    if (imgCount > 0) {
+    try {
+      if (rawText.length < _SPARSE) return { trigger: 'sparse_text', borderline: false };
+      const imgCount = await _countImages(page);
+      if (imgCount > 0) {
+        const cov = await _imgCoverage(page, blocks);
+        if (cov > _IMG_MIN) return { trigger: 'image_content', borderline: false };
+      }
       const cov = await _imgCoverage(page, blocks);
-      if (cov > _IMG_MIN) return { trigger: 'image_content', borderline: false };
-    }
-    const cov = await _imgCoverage(page, blocks);
-    if (imgCount === 0 && cov > _VEC_MIN) return { trigger: 'vector_diagram', borderline: cov < _VEC_BORDER };
-    return { trigger: null, borderline: false };
+      if (imgCount === 0 && cov > _VEC_MIN) return { trigger: 'vector_diagram', borderline: cov < _VEC_BORDER };
+      return { trigger: null, borderline: false };
+    } catch (e) { _pipelineErr('_triggerReason', e); }
   }
 
   function _buildSlideStructure(blocks) {
@@ -1070,16 +1083,21 @@ quiz saved → Take Quiz → Finish & Export
 
           let canvas = null;
           if (trigger && password) {
-            const vp = page.getViewport({ scale: 2 });
-            canvas = document.createElement('canvas');
-            canvas.width = vp.width; canvas.height = vp.height;
-            await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+            try {
+              const vp = page.getViewport({ scale: 2 });
+              canvas = document.createElement('canvas');
+              canvas.width = vp.width; canvas.height = vp.height;
+              await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+            } catch (e) {
+              console.warn(`Slide ${slideNum} canvas render failed: ${e.message}`);
+            }
           }
 
           allSlides.push({ slideNum, structure, trigger, borderline, canvas, visualDesc: null });
         } catch (e) {
-          console.warn(`Slide ${slideNum} (${title} p${i}) skipped: ${e.message}`);
-          allSlides.push({ slideNum, structure: { title: `Slide ${slideNum} [extraction error: ${e.message}]`, bullets: [] }, trigger: null, borderline: false, canvas: null, visualDesc: null });
+          const errMsg = e.message || String(e);
+          console.warn(`Slide ${slideNum} (${title} p${i}) skipped — ${errMsg}`);
+          allSlides.push({ slideNum, structure: { title: `Slide ${slideNum}`, bullets: [`[skipped — ${errMsg}]`] }, trigger: null, borderline: false, canvas: null, visualDesc: null });
         }
       }
     }
@@ -1108,13 +1126,16 @@ quiz saved → Take Quiz → Finish & Export
         };
       });
 
-      const submitRes = await fetch('/api/gemini-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
-        body: JSON.stringify({ slides: batchSlides })
-      });
-      const submitData = await submitRes.json();
-      if (!submitData.ok) throw new Error(submitData.error || 'Batch submit failed');
+      let submitData;
+      try {
+        const submitRes = await fetch('/api/gemini-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+          body: JSON.stringify({ slides: batchSlides })
+        });
+        submitData = await submitRes.json();
+      } catch (e) { throw new Error(`gemini-batch POST (network): ${e.message}`); }
+      if (!submitData.ok) throw new Error(`gemini-batch POST: ${submitData.error || 'unknown error'}`);
 
       const { batchName } = submitData;
 
@@ -1124,16 +1145,19 @@ quiz saved → Take Quiz → Finish & Export
         await new Promise(r => setTimeout(r, 5000));
         onProgress?.(`Waiting for Gemini batch… (${(attempt + 1) * 5}s)`);
 
-        const pollRes = await fetch(
-          `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
-          { headers: { 'x-admin-password': password } }
-        );
-        const pollData = await pollRes.json();
-        if (!pollData.ok) throw new Error(pollData.error || 'Batch poll failed');
+        let pollData;
+        try {
+          const pollRes = await fetch(
+            `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
+            { headers: { 'x-admin-password': password } }
+          );
+          pollData = await pollRes.json();
+        } catch (e) { throw new Error(`gemini-batch GET (network): ${e.message}`); }
+        if (!pollData.ok) throw new Error(`gemini-batch GET: ${pollData.error || 'unknown error'}`);
 
         if (pollData.state === 'JOB_STATE_SUCCEEDED') { results = pollData.results; break; }
         if (pollData.state === 'JOB_STATE_FAILED' || pollData.state === 'JOB_STATE_CANCELLED') {
-          throw new Error(`Batch job ${pollData.state}`);
+          throw new Error(`gemini-batch GET: job ended with state ${pollData.state}`);
         }
       }
       if (!results) throw new Error('Batch job timed out after 10 minutes');
