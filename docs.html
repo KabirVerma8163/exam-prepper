@@ -141,11 +141,29 @@
         placeholder="Paste past exam questions here…&#10;&#10;1. Which of the following…&#10;   A) …  B) …"></textarea>
     </div>
 
+    <!-- Gemini-enriched slides (test branch) -->
+    <div class="form-group" style="margin-bottom:1.25rem;padding:1rem;border:1px dashed var(--border);border-radius:var(--radius);background:var(--surface)">
+      <label>Gemini slide analysis <span class="text-muted">(optional — for self-contained prompt)</span></label>
+      <p class="text-sm text-muted" style="margin-bottom:.5rem">
+        Paste the output of <code>npm run extract-slides</code> (<code>slides.md</code>), or upload the file.
+        If provided, the enriched prompt embeds this instead of raw extracted text — diagrams and visual descriptions are included inline.
+      </p>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+        <button class="btn btn-ghost btn-sm" id="btn-load-slides-md">📂 Load slides.md</button>
+        <button class="btn btn-ghost btn-sm" id="btn-clear-slides-md" style="display:none">✕ Clear</button>
+        <span id="slides-md-status" class="text-sm text-muted"></span>
+      </div>
+      <textarea id="gen-slides-md" rows="4"
+        placeholder="## Slide 1: Introduction&#10;- Key concept…&#10;&#10;> **[Visual]** Diagram showing…&#10;&#10;---&#10;&#10;## Slide 2: …"
+        style="font-family:monospace;font-size:.76rem"></textarea>
+    </div>
+
     <div class="flex gap-1 flex-wrap">
       <button class="btn btn-primary" id="btn-gen-quiz-prompt">📋 Copy Quiz Generation Prompt</button>
+      <button class="btn btn-secondary" id="btn-gen-enriched-prompt">✨ Copy Self-Contained Prompt</button>
       <button class="btn btn-secondary" id="btn-gen-grading-prompt">📋 Copy Grading Prompt</button>
     </div>
-    <p id="prompt-size-hint" class="text-sm text-muted" style="margin-top:.65rem;max-width:44rem">Tip: in Claude/ChatGPT, attach your PDFs in the chat and paste the prompt. This keeps prompts small and preserves diagrams/figures.</p>
+    <p id="prompt-size-hint" class="text-sm text-muted" style="margin-top:.65rem;max-width:44rem">Tip: the standard prompt asks you to attach PDFs in chat. The self-contained prompt embeds all material inline — no attachments needed, but the prompt will be larger.</p>
   </div>
 
   <!-- ── Step 4: Paste LLM result ───────────────────────────────────────────── -->
@@ -863,15 +881,148 @@ quiz saved → Take Quiz → Finish & Export
     return lines.join('\n');
   }
 
+  // ── slides.md loader ──────────────────────────────────────────────────────
+  document.getElementById('btn-load-slides-md').addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.md,.txt';
+    input.addEventListener('change', async () => {
+      const text = await input.files[0].text();
+      document.getElementById('gen-slides-md').value = text;
+      document.getElementById('slides-md-status').textContent = `✓ ${input.files[0].name} (${text.split('\n').length} lines)`;
+      document.getElementById('btn-clear-slides-md').style.display = '';
+    });
+    input.click();
+  });
+  document.getElementById('btn-clear-slides-md').addEventListener('click', () => {
+    document.getElementById('gen-slides-md').value = '';
+    document.getElementById('slides-md-status').textContent = '';
+    document.getElementById('btn-clear-slides-md').style.display = 'none';
+  });
+
+  // ── Serialize material to markdown ────────────────────────────────────────
+  function serializeMaterial(material) {
+    if (!material?.sources?.length) return null;
+    const lines = [];
+    for (const src of material.sources) {
+      lines.push(`# Source: ${src.title || src.filename}`);
+      for (const topic of (src.topics || [])) {
+        lines.push(`\n## ${topic.name}`);
+        for (const chunk of (topic.chunks || [])) {
+          if (chunk.content?.trim()) lines.push(chunk.content.trim());
+        }
+      }
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  // ── Self-contained enriched prompt ────────────────────────────────────────
+  function buildEnrichedPrompt() {
+    const mcq   = parseInt(document.getElementById('gen-mcq').value)  || 0;
+    const tf    = parseInt(document.getElementById('gen-tf').value)   || 0;
+    const sa    = parseInt(document.getElementById('gen-sa').value)   || 0;
+    const fb    = parseInt(document.getElementById('gen-fb').value)   || 0;
+    const la    = parseInt(document.getElementById('gen-la').value)   || 0;
+    const total = mcq + tf + sa + fb + la;
+    const diff  = document.getElementById('gen-difficulty').value;
+    const custom    = document.getElementById('gen-custom').value.trim();
+    const reference = document.getElementById('gen-reference').value.trim();
+    const slidesMd  = document.getElementById('gen-slides-md').value.trim();
+    const material  = getSelectedSources();
+
+    const typeLines = [];
+    if (mcq > 0) typeLines.push(`- ${mcq} multiple choice questions (type: "mcq")`);
+    if (tf  > 0) typeLines.push(`- ${tf} true/false questions (type: "true_false")`);
+    if (sa  > 0) typeLines.push(`- ${sa} short answer questions (type: "short_answer") — 2–5 sentences`);
+    if (fb  > 0) typeLines.push(`- ${fb} fill-in-the-blank questions (type: "fill_blank")`);
+    if (la  > 0) typeLines.push(`- ${la} long answer questions (type: "long_answer") — multi-paragraph essay response`);
+
+    const lines = [
+      '# Task: Generate a Practice Quiz',
+      '',
+      'You are generating a practice quiz for a student. You must return ONLY a valid JSON object matching the quiz schema below. No markdown, no explanation, no code fences — just raw JSON.',
+      '',
+      '## Required question breakdown',
+      `Generate exactly ${total} questions in total:`,
+      ...typeLines,
+      `Difficulty: ${diff}`,
+      '',
+      '## Hard rules',
+      '- Every question must have a non-null topic_name matching the content it draws from',
+      '- MCQ: exactly 4 options (a, b, c, d) with plausible distractors',
+      '- true_false: correct_answer must be the string "true" or "false"',
+      '- short_answer: provide a detailed rubric AND at least 3 answer_pointers',
+      '- long_answer: provide a detailed rubric AND at least 5 answer_pointers',
+      '- fill_blank: use ___ in the question text; blanks array must have one entry per ___',
+      '- marks: 1 for mcq/true_false, 2–5 for short_answer, 5–15 for long_answer, number-of-blanks for fill_blank',
+      '- All user_answer, flagged, visited fields and all grading sub-fields must be null/false/"ungraded"',
+    ];
+
+    if (custom) lines.push('', '## Additional instructions from the user', custom);
+    if (reference) {
+      lines.push('', '## Reference exam',
+        'Match its style, difficulty, and depth. Do not copy questions — use as a style guide only.',
+        '', reference);
+    }
+
+    lines.push('', '## Quiz JSON Schema', JSON.stringify(QUIZ_SCHEMA, null, 2));
+    lines.push('', '## Full working example', JSON.stringify(QUIZ_EXAMPLE, null, 2));
+
+    // Embed content — prefer Gemini-enriched slides.md, fall back to raw material text
+    if (slidesMd) {
+      const srcTitles = (material?.sources || []).map(s => s.filename || s.title).filter(Boolean);
+      lines.push(
+        '',
+        '## Source material (Gemini-enriched slide extraction)',
+        srcTitles.length ? `Sources: ${srcTitles.join(', ')}` : '',
+        'The following is a slide-by-slide extraction of the lecture material. Visual content,',
+        'diagrams, and charts are described inline under [Visual] or [Diagram Structure] tags.',
+        '',
+        slidesMd
+      );
+    } else {
+      const serialized = serializeMaterial(material);
+      if (serialized) {
+        lines.push(
+          '',
+          '## Source material (extracted text)',
+          'The following is the full extracted text from the source material, organized by topic.',
+          'Note: diagrams and figures are not captured here — if accuracy on visual content matters,',
+          'use the Gemini-enriched slides.md workflow instead.',
+          '',
+          serialized
+        );
+      } else {
+        lines.push('', '## Source material', '(No material loaded — load your PDFs or material.json in Step 1)');
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   document.getElementById('btn-gen-quiz-prompt').addEventListener('click', async () => {
     const prompt = buildQuizGenerationPrompt();
     const hintEl = document.getElementById('prompt-size-hint');
-
     await Export.copyToClipboard(prompt);
     UI.toast('Quiz generation prompt copied!', 'success');
     if (hintEl) {
       hintEl.textContent = 'Copied. Attach your PDFs in chat before sending.';
-      hintEl.style.color = 'var(--text-muted)';
+      hintEl.style.color = '';
+    }
+  });
+
+  document.getElementById('btn-gen-enriched-prompt').addEventListener('click', async () => {
+    const prompt = buildEnrichedPrompt();
+    const hintEl = document.getElementById('prompt-size-hint');
+    const kb = Math.round(new TextEncoder().encode(prompt).length / 1024);
+    const slidesMd = document.getElementById('gen-slides-md').value.trim();
+    await Export.copyToClipboard(prompt);
+    UI.toast('Self-contained prompt copied!', 'success');
+    if (hintEl) {
+      const src = slidesMd ? 'Gemini-enriched slides.md' : 'raw extracted text';
+      hintEl.textContent = `Copied (${kb} KB, ${src}). No attachments needed — all material is embedded.`;
+      hintEl.style.color = kb > 400 ? 'var(--warning)' : '';
     }
   });
 
