@@ -151,6 +151,8 @@
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
         <button class="btn btn-ghost btn-sm" id="btn-load-slides-md">📂 Load slides.md</button>
         <button class="btn btn-ghost btn-sm" id="btn-clear-slides-md" style="display:none">✕ Clear</button>
+        <input type="password" id="gemini-password" placeholder="Admin password" style="height:2rem;padding:0 .6rem;font-size:.8rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:140px">
+        <button class="btn btn-ghost btn-sm" id="btn-generate-slides-md">⚡ Generate with Gemini</button>
         <span id="slides-md-status" class="text-sm text-muted"></span>
       </div>
       <textarea id="gen-slides-md" rows="4"
@@ -339,6 +341,7 @@ quiz saved → Take Quiz → Finish & Export
 
   // ── State ──────────────────────────────────────────────────────────────────
   let loadedMaterial = null;
+  let loadedPDFBuffers = []; // [{ title, buffer }] — kept in memory for Gemini enrichment
 
   // ── Schema content ─────────────────────────────────────────────────────────
 
@@ -579,12 +582,15 @@ quiz saved → Take Quiz → Finish & Export
     const status = document.getElementById('pdf-process-status');
     status.innerHTML = `<span class="text-muted">Processing ${files.length} PDF${files.length > 1 ? 's' : ''}…</span>`;
 
+    loadedPDFBuffers = [];
     const sources = [];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       status.innerHTML = `<span class="text-muted">Processing ${i + 1}/${files.length}: ${UI.escapeHtml(f.name)}…</span>`;
       try {
-        const src = await processPDFFile(f);
+        const buf = await f.arrayBuffer();
+        loadedPDFBuffers.push({ title: f.name.replace(/\.pdf$/i, ''), buffer: buf });
+        const src = await processPDFFile(f, buf);
         sources.push(src);
       } catch (err) {
         status.innerHTML += `<br><span style="color:var(--danger)">✗ ${UI.escapeHtml(f.name)}: ${err.message}</span>`;
@@ -607,9 +613,9 @@ quiz saved → Take Quiz → Finish & Export
     applyLoadedMaterial(material, labelGuess);
   }
 
-  async function processPDFFile(file) {
+  async function processPDFFile(file, existingBuffer) {
     const sourceId = `bsrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = existingBuffer ?? await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
     // First pass: collect font heights for threshold detection
@@ -899,8 +905,189 @@ quiz saved → Take Quiz → Finish & Export
     document.getElementById('slides-md-status').textContent = '';
     document.getElementById('btn-clear-slides-md').style.display = 'none';
   });
+  document.getElementById('btn-generate-slides-md').addEventListener('click', async () => {
+    const password = document.getElementById('gemini-password').value.trim();
+    const statusEl = document.getElementById('slides-md-status');
+    const btn = document.getElementById('btn-generate-slides-md');
+    if (!password) { UI.toast('Enter admin password first', 'error'); return; }
+    if (!loadedPDFBuffers.length) { UI.toast('Upload PDFs in Step 1 first', 'error'); return; }
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating…';
+    statusEl.textContent = 'Starting…';
+    try {
+      const md = await generateEnrichedSlidesMd(password, msg => { statusEl.textContent = msg; });
+      document.getElementById('gen-slides-md').value = md;
+      document.getElementById('btn-clear-slides-md').style.display = '';
+      const lines = md.split('\n').length;
+      statusEl.textContent = `✓ Generated (${lines} lines)`;
+      UI.toast('Slides.md generated!', 'success');
+    } catch (e) {
+      statusEl.textContent = `Error: ${e.message}`;
+      UI.toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⚡ Generate with Gemini';
+    }
+  });
 
-  // ── Serialize material to markdown ────────────────────────────────────────
+  // ── Gemini enrichment pipeline ────────────────────────────────────────────
+  // Mirrors extract_slides.mjs logic, running entirely in the browser.
+
+  const _SPARSE = 60, _IMG_MIN = 0.05, _VEC_MIN = 0.10, _VEC_BORDER = 0.15;
+
+  async function _extractBlocks(page) {
+    const content = await page.getTextContent();
+    return content.items.filter(i => i.str?.trim()).map(i => ({
+      text: i.str, x: i.transform[4], y: i.transform[5], fontSize: i.height
+    }));
+  }
+
+  async function _countImages(page) {
+    const ops = await page.getOperatorList();
+    const { paintImageXObject, paintInlineImageXObject, paintImageMaskXObject } = pdfjsLib.OPS;
+    return ops.fnArray.filter(op => op === paintImageXObject || op === paintInlineImageXObject || op === paintImageMaskXObject).length;
+  }
+
+  async function _imgCoverage(page, blocks) {
+    const scale = 0.4;
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+    const total = width * height;
+    const mask = new Uint8Array(total);
+    for (const b of blocks) {
+      const bx = Math.round(b.x * scale);
+      const by = Math.round((vp.height / scale - b.y) * scale);
+      const bw = Math.round(b.text.length * b.fontSize * 0.6 * scale);
+      const bh = Math.round(b.fontSize * scale * 1.5);
+      for (let r = Math.max(0, by - bh); r < Math.min(height, by + 4); r++)
+        for (let col = Math.max(0, bx); col < Math.min(width, bx + bw); col++)
+          mask[r * width + col] = 1;
+    }
+    let nw = 0;
+    for (let idx = 0; idx < total; idx++) {
+      if (mask[idx]) continue;
+      if (data[idx*4] < 240 || data[idx*4+1] < 240 || data[idx*4+2] < 240) nw++;
+    }
+    return nw / total;
+  }
+
+  async function _triggerReason(rawText, blocks, page) {
+    if (rawText.length < _SPARSE) return { trigger: 'sparse_text', borderline: false };
+    const imgCount = await _countImages(page);
+    if (imgCount > 0) {
+      const cov = await _imgCoverage(page, blocks);
+      if (cov > _IMG_MIN) return { trigger: 'image_content', borderline: false };
+    }
+    const cov = await _imgCoverage(page, blocks);
+    if (imgCount === 0 && cov > _VEC_MIN) return { trigger: 'vector_diagram', borderline: cov < _VEC_BORDER };
+    return { trigger: null, borderline: false };
+  }
+
+  function _buildSlideStructure(blocks) {
+    if (!blocks.length) return { title: '', bullets: [] };
+    const sorted = [...blocks].sort((a, b) => b.y - a.y);
+    const topY = sorted[0].y, btmY = sorted[sorted.length - 1].y;
+    const ph = topY - btmY || 1;
+    const topZone = blocks.filter(b => b.y > topY - ph * 0.3);
+    const titleBlock = topZone.sort((a, b) => b.fontSize - a.fontSize)[0] ?? [...blocks].sort((a, b) => b.fontSize - a.fontSize)[0];
+    const lineMap = {};
+    for (const b of blocks.filter(b => b !== titleBlock)) {
+      const k = Math.round(b.y / 4) * 4;
+      (lineMap[k] = lineMap[k] || []).push(b);
+    }
+    const bullets = Object.entries(lineMap)
+      .sort(([a], [b]) => Number(b) - Number(a))
+      .map(([, line]) => {
+        const lb = line.sort((a, b) => a.x - b.x);
+        return { text: lb.map(b => b.text).join(' ').trim(), level: Math.max(0, Math.round((lb[0].x - titleBlock.x) / 20)) };
+      }).filter(b => b.text.length > 0);
+    return { title: titleBlock.text.trim(), bullets };
+  }
+
+  function _formatSlide(n, structure, visualDesc, trigger) {
+    const lines = [`## Slide ${n}: ${structure.title || '(untitled)'}`];
+    for (const b of structure.bullets) lines.push(`${'  '.repeat(b.level)}- ${b.text}`);
+    if (visualDesc && visualDesc.toLowerCase() !== 'text only') {
+      const tag = trigger === 'vector_diagram' ? '[Diagram Structure]' : '[Visual]';
+      lines.push(`\n> **${tag}** ${visualDesc}`);
+    }
+    return lines.join('\n');
+  }
+
+  async function _callGeminiProxy(canvas, trigger, borderline, password) {
+    const MAX_W = 1440;
+    let src = canvas;
+    if (canvas.width > MAX_W) {
+      const s = MAX_W / canvas.width;
+      const tmp = document.createElement('canvas');
+      tmp.width = Math.round(canvas.width * s);
+      tmp.height = Math.round(canvas.height * s);
+      tmp.getContext('2d').drawImage(canvas, 0, 0, tmp.width, tmp.height);
+      src = tmp;
+    }
+    const imageBase64 = src.toDataURL('image/jpeg', 0.85).split(',')[1];
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+      body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg', triggerReason: trigger, borderline })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Gemini proxy error');
+    return data.text;
+  }
+
+  async function generateEnrichedSlidesMd(password, onProgress) {
+    if (!loadedPDFBuffers.length) throw new Error('No PDFs loaded — upload PDFs in Step 1 first.');
+    const slides = [];
+    let slideNum = 0;
+    let totalPages = 0;
+
+    // Count total pages first for progress
+    const pdfs = [];
+    for (const { title, buffer } of loadedPDFBuffers) {
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+      pdfs.push({ title, pdf });
+      totalPages += pdf.numPages;
+    }
+
+    for (const { title, pdf } of pdfs) {
+      for (let i = 1; i <= pdf.numPages; i++) {
+        slideNum++;
+        onProgress?.(`${title} — slide ${i}/${pdf.numPages} (${slideNum}/${totalPages} total)`);
+
+        const page = await pdf.getPage(i);
+        const blocks = await _extractBlocks(page);
+        const rawText = blocks.map(b => b.text).join(' ');
+        const structure = _buildSlideStructure(blocks);
+        const { trigger, borderline } = await _triggerReason(rawText, blocks, page);
+
+        let visualDesc = null;
+        if (trigger && password) {
+          const vp = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = vp.width; canvas.height = vp.height;
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+          try {
+            visualDesc = await _callGeminiProxy(canvas, trigger, borderline, password);
+          } catch (e) {
+            visualDesc = `[Gemini error: ${e.message}]`;
+          }
+        }
+
+        slides.push(_formatSlide(slideNum, structure, visualDesc, trigger));
+      }
+    }
+
+    return slides.join('\n\n---\n\n');
+  }
+
+  // ── slides.md loader ──────────────────────────────────────────────────────
   function serializeMaterial(material) {
     if (!material?.sources?.length) return null;
     const lines = [];
