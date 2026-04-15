@@ -1102,12 +1102,12 @@ quiz saved → Take Quiz → Finish & Export
       }
     }
 
-    // Phase 2: encode triggered slides and split into ≤4000 KB chunks
+    // Phase 2: call gemini-proxy in parallel for all triggered slides
     const triggered = allSlides.filter(s => s.trigger && s.canvas);
     if (triggered.length > 0 && password) {
-      const MAX_CHUNK_KB = 4000;
+      onProgress?.(`Analysing ${triggered.length} slide(s) with Gemini (parallel)…`);
 
-      const encoded = triggered.map(s => {
+      const results = await Promise.all(triggered.map(async (s, idx) => {
         const MAX_W = 1440;
         let src = s.canvas;
         if (src.width > MAX_W) {
@@ -1118,79 +1118,22 @@ quiz saved → Take Quiz → Finish & Export
           tmp.getContext('2d').drawImage(src, 0, 0, tmp.width, tmp.height);
           src = tmp;
         }
-        return {
-          imageBase64: src.toDataURL('image/jpeg', 0.85).split(',')[1],
-          mimeType: 'image/jpeg',
-          triggerReason: s.trigger,
-          borderline: s.borderline
-        };
-      });
-
-      // Split into chunks that each fit within the Vercel body limit
-      const chunks = [];
-      let chunk = [], chunkKB = 0;
-      for (const slide of encoded) {
-        const slideKB = new TextEncoder().encode(JSON.stringify(slide)).length / 1024;
-        if (chunk.length > 0 && chunkKB + slideKB > MAX_CHUNK_KB) {
-          chunks.push(chunk);
-          chunk = []; chunkKB = 0;
+        const imageBase64 = src.toDataURL('image/jpeg', 0.85).split(',')[1];
+        try {
+          const res = await fetch('/api/gemini-proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+            body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg', triggerReason: s.trigger, borderline: s.borderline })
+          });
+          const data = await res.json();
+          if (!data.ok) return `[Gemini error: ${data.error}]`;
+          return data.text;
+        } catch (e) {
+          return `[Gemini error: ${e.message}]`;
         }
-        chunk.push(slide); chunkKB += slideKB;
-      }
-      if (chunk.length) chunks.push(chunk);
+      }));
 
-      console.log(`[gemini-batch] ${triggered.length} slides → ${chunks.length} chunk(s)`);
-
-      // Phase 3: submit each chunk, poll, collect results in order
-      const allResults = [];
-      for (let ci = 0; ci < chunks.length; ci++) {
-        const slides = chunks[ci];
-        onProgress?.(`Submitting chunk ${ci + 1}/${chunks.length} (${slides.length} slide(s))…`);
-
-        let bodyStr;
-        try { bodyStr = JSON.stringify({ slides }); }
-        catch (e) { throw new Error(`JSON.stringify chunk ${ci + 1}: ${e.message}`); }
-
-        let submitRes;
-        try { submitRes = await fetch('/api/gemini-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
-          body: bodyStr
-        }); } catch (e) { throw new Error(`gemini-batch POST chunk ${ci + 1} fetch(): ${e.message}`); }
-
-        let submitData;
-        try { submitData = await submitRes.json(); }
-        catch (e) { throw new Error(`gemini-batch POST chunk ${ci + 1} response.json() [HTTP ${submitRes.status}]: ${e.message}`); }
-        if (!submitData.ok) throw new Error(`gemini-batch POST chunk ${ci + 1}: ${submitData.error || 'unknown error'}`);
-
-        const { batchName } = submitData;
-
-        // Poll this chunk until done
-        let chunkResults = null;
-        for (let attempt = 0; attempt < 120; attempt++) {
-          await new Promise(r => setTimeout(r, 5000));
-          onProgress?.(`Chunk ${ci + 1}/${chunks.length} — waiting… (${(attempt + 1) * 5}s)`);
-
-          let pollData;
-          try {
-            const pollRes = await fetch(
-              `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
-              { headers: { 'x-admin-password': password } }
-            );
-            pollData = await pollRes.json();
-          } catch (e) { throw new Error(`gemini-batch GET chunk ${ci + 1} (network): ${e.message}`); }
-          if (!pollData.ok) throw new Error(`gemini-batch GET chunk ${ci + 1}: ${pollData.error || 'unknown error'}`);
-
-          if (pollData.state === 'JOB_STATE_SUCCEEDED') { chunkResults = pollData.results; break; }
-          if (pollData.state === 'JOB_STATE_FAILED' || pollData.state === 'JOB_STATE_CANCELLED') {
-            throw new Error(`gemini-batch chunk ${ci + 1} ended with state ${pollData.state}`);
-          }
-        }
-        if (!chunkResults) throw new Error(`Batch chunk ${ci + 1} timed out after 10 minutes`);
-        allResults.push(...chunkResults);
-      }
-
-      triggered.forEach((slide, i) => { slide.visualDesc = allResults[i]; });
+      triggered.forEach((slide, i) => { slide.visualDesc = results[i]; });
     }
 
     // Phase 4: assemble output
