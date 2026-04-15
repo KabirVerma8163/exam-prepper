@@ -616,7 +616,7 @@ quiz saved → Take Quiz → Finish & Export
   async function processPDFFile(file, existingBuffer) {
     const sourceId = `bsrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const arrayBuffer = existingBuffer ?? await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
 
     // First pass: collect font heights for threshold detection
     const allHeights = [];
@@ -1051,7 +1051,7 @@ quiz saved → Take Quiz → Finish & Export
     // Count total pages first for progress
     const pdfs = [];
     for (const { title, buffer } of loadedPDFBuffers) {
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
       pdfs.push({ title, pdf });
       totalPages += pdf.numPages;
     }
