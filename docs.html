@@ -1126,15 +1126,25 @@ quiz saved → Take Quiz → Finish & Export
         };
       });
 
+      let bodyStr;
+      try { bodyStr = JSON.stringify({ slides: batchSlides }); }
+      catch (e) { throw new Error(`JSON.stringify batchSlides: ${e.message}`); }
+
+      const bodySizeKB = Math.round(new TextEncoder().encode(bodyStr).length / 1024);
+      console.log(`[gemini-batch] payload size: ${bodySizeKB} KB, slides: ${batchSlides.length}`);
+      if (bodySizeKB > 4000) throw new Error(`Batch payload too large (${bodySizeKB} KB) — Vercel limit is ~4500 KB. Try a PDF with fewer visual slides.`);
+
+      let submitRes;
+      try { submitRes = await fetch('/api/gemini-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+        body: bodyStr
+      }); } catch (e) { throw new Error(`gemini-batch POST fetch(): ${e.message}`); }
+
       let submitData;
-      try {
-        const submitRes = await fetch('/api/gemini-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
-          body: JSON.stringify({ slides: batchSlides })
-        });
-        submitData = await submitRes.json();
-      } catch (e) { throw new Error(`gemini-batch POST (network): ${e.message}`); }
+      try { submitData = await submitRes.json(); }
+      catch (e) { throw new Error(`gemini-batch POST response.json() [HTTP ${submitRes.status}]: ${e.message}`); }
+
       if (!submitData.ok) throw new Error(`gemini-batch POST: ${submitData.error || 'unknown error'}`);
 
       const { batchName } = submitData;
