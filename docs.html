@@ -1102,12 +1102,12 @@ quiz saved → Take Quiz → Finish & Export
       }
     }
 
-    // Phase 2: batch submit all triggered slides
+    // Phase 2: encode triggered slides and split into ≤4000 KB chunks
     const triggered = allSlides.filter(s => s.trigger && s.canvas);
     if (triggered.length > 0 && password) {
-      onProgress?.(`Submitting ${triggered.length} slide(s) to Gemini batch…`);
+      const MAX_CHUNK_KB = 4000;
 
-      const batchSlides = triggered.map(s => {
+      const encoded = triggered.map(s => {
         const MAX_W = 1440;
         let src = s.canvas;
         if (src.width > MAX_W) {
@@ -1126,53 +1126,71 @@ quiz saved → Take Quiz → Finish & Export
         };
       });
 
-      let bodyStr;
-      try { bodyStr = JSON.stringify({ slides: batchSlides }); }
-      catch (e) { throw new Error(`JSON.stringify batchSlides: ${e.message}`); }
-
-      const bodySizeKB = Math.round(new TextEncoder().encode(bodyStr).length / 1024);
-      console.log(`[gemini-batch] payload size: ${bodySizeKB} KB, slides: ${batchSlides.length}`);
-      if (bodySizeKB > 4000) throw new Error(`Batch payload too large (${bodySizeKB} KB) — Vercel limit is ~4500 KB. Try a PDF with fewer visual slides.`);
-
-      let submitRes;
-      try { submitRes = await fetch('/api/gemini-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
-        body: bodyStr
-      }); } catch (e) { throw new Error(`gemini-batch POST fetch(): ${e.message}`); }
-
-      let submitData;
-      try { submitData = await submitRes.json(); }
-      catch (e) { throw new Error(`gemini-batch POST response.json() [HTTP ${submitRes.status}]: ${e.message}`); }
-
-      if (!submitData.ok) throw new Error(`gemini-batch POST: ${submitData.error || 'unknown error'}`);
-
-      const { batchName } = submitData;
-
-      // Phase 3: poll until done (max 10 min)
-      let results = null;
-      for (let attempt = 0; attempt < 120; attempt++) {
-        await new Promise(r => setTimeout(r, 5000));
-        onProgress?.(`Waiting for Gemini batch… (${(attempt + 1) * 5}s)`);
-
-        let pollData;
-        try {
-          const pollRes = await fetch(
-            `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
-            { headers: { 'x-admin-password': password } }
-          );
-          pollData = await pollRes.json();
-        } catch (e) { throw new Error(`gemini-batch GET (network): ${e.message}`); }
-        if (!pollData.ok) throw new Error(`gemini-batch GET: ${pollData.error || 'unknown error'}`);
-
-        if (pollData.state === 'JOB_STATE_SUCCEEDED') { results = pollData.results; break; }
-        if (pollData.state === 'JOB_STATE_FAILED' || pollData.state === 'JOB_STATE_CANCELLED') {
-          throw new Error(`gemini-batch GET: job ended with state ${pollData.state}`);
+      // Split into chunks that each fit within the Vercel body limit
+      const chunks = [];
+      let chunk = [], chunkKB = 0;
+      for (const slide of encoded) {
+        const slideKB = new TextEncoder().encode(JSON.stringify(slide)).length / 1024;
+        if (chunk.length > 0 && chunkKB + slideKB > MAX_CHUNK_KB) {
+          chunks.push(chunk);
+          chunk = []; chunkKB = 0;
         }
+        chunk.push(slide); chunkKB += slideKB;
       }
-      if (!results) throw new Error('Batch job timed out after 10 minutes');
+      if (chunk.length) chunks.push(chunk);
 
-      triggered.forEach((slide, i) => { slide.visualDesc = results[i]; });
+      console.log(`[gemini-batch] ${triggered.length} slides → ${chunks.length} chunk(s)`);
+
+      // Phase 3: submit each chunk, poll, collect results in order
+      const allResults = [];
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const slides = chunks[ci];
+        onProgress?.(`Submitting chunk ${ci + 1}/${chunks.length} (${slides.length} slide(s))…`);
+
+        let bodyStr;
+        try { bodyStr = JSON.stringify({ slides }); }
+        catch (e) { throw new Error(`JSON.stringify chunk ${ci + 1}: ${e.message}`); }
+
+        let submitRes;
+        try { submitRes = await fetch('/api/gemini-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': password },
+          body: bodyStr
+        }); } catch (e) { throw new Error(`gemini-batch POST chunk ${ci + 1} fetch(): ${e.message}`); }
+
+        let submitData;
+        try { submitData = await submitRes.json(); }
+        catch (e) { throw new Error(`gemini-batch POST chunk ${ci + 1} response.json() [HTTP ${submitRes.status}]: ${e.message}`); }
+        if (!submitData.ok) throw new Error(`gemini-batch POST chunk ${ci + 1}: ${submitData.error || 'unknown error'}`);
+
+        const { batchName } = submitData;
+
+        // Poll this chunk until done
+        let chunkResults = null;
+        for (let attempt = 0; attempt < 120; attempt++) {
+          await new Promise(r => setTimeout(r, 5000));
+          onProgress?.(`Chunk ${ci + 1}/${chunks.length} — waiting… (${(attempt + 1) * 5}s)`);
+
+          let pollData;
+          try {
+            const pollRes = await fetch(
+              `/api/gemini-batch?batchName=${encodeURIComponent(batchName)}`,
+              { headers: { 'x-admin-password': password } }
+            );
+            pollData = await pollRes.json();
+          } catch (e) { throw new Error(`gemini-batch GET chunk ${ci + 1} (network): ${e.message}`); }
+          if (!pollData.ok) throw new Error(`gemini-batch GET chunk ${ci + 1}: ${pollData.error || 'unknown error'}`);
+
+          if (pollData.state === 'JOB_STATE_SUCCEEDED') { chunkResults = pollData.results; break; }
+          if (pollData.state === 'JOB_STATE_FAILED' || pollData.state === 'JOB_STATE_CANCELLED') {
+            throw new Error(`gemini-batch chunk ${ci + 1} ended with state ${pollData.state}`);
+          }
+        }
+        if (!chunkResults) throw new Error(`Batch chunk ${ci + 1} timed out after 10 minutes`);
+        allResults.push(...chunkResults);
+      }
+
+      triggered.forEach((slide, i) => { slide.visualDesc = allResults[i]; });
     }
 
     // Phase 4: assemble output
