@@ -94,6 +94,7 @@
     <span class="progress-text" id="progress-text">0 / 0</span>
     <span id="timer" class="text-sm text-muted"></span>
     <button class="btn btn-sm btn-ghost" id="btn-mode-toggle" title="Switch to scroll mode">≡ Scroll</button>
+    <button class="btn btn-sm btn-ghost" id="btn-instant-mark" title="Reveal correct answer immediately after answering">☑ Instant Mark</button>
     <button class="btn btn-sm btn-secondary" id="btn-change-quiz">Change Quiz</button>
     <button class="btn btn-sm btn-primary" id="btn-finish-header">Finish & Export</button>
   </div>
@@ -194,6 +195,7 @@
   let currentTopicFilter = null; // null = all
   let scrollMode = false;
   let scrollObserver = null;
+  let instantMark = false;
 
   // ── Elements ──────────────────────────────────────────────────────────────
   const loadScreen      = document.getElementById('load-screen');
@@ -486,7 +488,63 @@
     Quiz.setAnswer(questionId, answer);
     updateProgressBar();
     renderGrid();
-    // No auto-advance in scroll mode
+    if (instantMark) {
+      const q = Quiz.getData().questions.find(q => q.id === questionId);
+      if (q) { autoGradeQuestion(q); showInstantReveal(q); }
+    }
+  }
+
+  // ── Instant mark toggle ────────────────────────────────────────────────────
+  document.getElementById('btn-instant-mark').addEventListener('click', () => {
+    instantMark = !instantMark;
+    const btn = document.getElementById('btn-instant-mark');
+    btn.classList.toggle('btn-primary', instantMark);
+    btn.classList.toggle('btn-ghost', !instantMark);
+    btn.title = instantMark ? 'Instant marking on — click to disable' : 'Reveal correct answer immediately after answering';
+  });
+
+  // ── Client-side auto-grade (used by instant mark) ─────────────────────────
+  function autoGradeQuestion(q) {
+    const max = q.marks || 1;
+    if (q.type === 'mcq' || q.type === 'true_false') {
+      const correct = String(q.correct_answer ?? '').toLowerCase().trim();
+      const given   = String(q.user_answer   ?? '').toLowerCase().trim();
+      const score   = correct && given && correct === given ? max : 0;
+      q.grading = { ...q.grading, status: 'graded', graded_by: 'auto', score, max_score: max, graded_at: new Date().toISOString() };
+    } else if (q.type === 'fill_blank') {
+      const correct = Array.isArray(q.correct_answer) ? q.correct_answer : [q.correct_answer];
+      const given   = Array.isArray(q.user_answer)    ? q.user_answer    : [q.user_answer];
+      const score   = correct.reduce((s, ans, i) =>
+        s + (ans && given[i] && String(ans).toLowerCase().trim() === String(given[i]).toLowerCase().trim() ? 1 : 0), 0);
+      q.grading = { ...q.grading, status: 'graded', graded_by: 'auto', score, max_score: correct.length, graded_at: new Date().toISOString() };
+    }
+    // short/long answer: no auto-score, just surface answer_pointers via a hint panel
+  }
+
+  function showInstantReveal(q) {
+    const qEl = questionDisplay.querySelector(`[data-qid="${q.id}"]`);
+    if (!qEl) return;
+    // Remove any existing reveal
+    qEl.querySelector('.instant-reveal')?.remove();
+
+    const reveal = document.createElement('div');
+    if (q.type === 'short_answer' || q.type === 'long_answer') {
+      // Self-mark hint — not auto-gradeable
+      reveal.className = 'answer-reveal instant-reveal';
+      reveal.style.borderColor = 'var(--border)';
+      if (q.answer_pointers?.length) {
+        reveal.innerHTML = `<strong>Key points to self-assess:</strong><ul>${q.answer_pointers.map(p => `<li>${UI.escapeHtml(p)}</li>`).join('')}</ul>`;
+      } else if (q.correct_answer) {
+        reveal.innerHTML = `<strong>Model answer:</strong> ${UI.escapeHtml(q.correct_answer)}`;
+      } else {
+        return; // nothing to show
+      }
+    } else {
+      // Auto-graded — use the standard reveal HTML
+      reveal.className = 'instant-reveal';
+      reveal.innerHTML = UI.renderAnswerReveal(q);
+    }
+    qEl.appendChild(reveal);
   }
 
   // ── Answer handler (paged) ─────────────────────────────────────────────────
@@ -495,12 +553,17 @@
     updateProgressBar();
     renderGrid();
     const q = Quiz.getData().questions.find(q => q.id === questionId);
-    if (q && (q.type === 'mcq' || q.type === 'true_false')) {
+    if (!q) return;
+
+    if (instantMark) {
+      autoGradeQuestion(q);
+      // Re-render in place with answer locked and reveal shown
+      questionDisplay.innerHTML = '';
+      const el = UI.renderQuestion(q, { showAnswer: true });
+      questionDisplay.appendChild(el);
+    } else if (q.type === 'mcq' || q.type === 'true_false') {
       setTimeout(() => {
-        if (Quiz.currentIndex < Quiz.totalActive - 1) {
-          Quiz.next();
-          renderCurrent();
-        }
+        if (Quiz.currentIndex < Quiz.totalActive - 1) { Quiz.next(); renderCurrent(); }
       }, 400);
     }
   }
